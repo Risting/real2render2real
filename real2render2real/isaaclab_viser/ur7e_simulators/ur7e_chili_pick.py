@@ -179,10 +179,10 @@ class ChiliPick(IsaacLabViser):
         """Set cam_0 (fixed D435I) and cam_1 (wrist D405) using eye/target pairs."""
         dev = self.scene.env_origins.device
 
-        # Cam 0: Fixed D435I looking directly at the robot base
+        # Cam 0: Fixed D435I — side view to see robot height on pillar
         robot_base = self.robot.data.root_state_w[0, :3]
-        fixed_eye = robot_base + self.T_base_cam_fixed
-        fixed_target = robot_base  # look at robot base, not table
+        fixed_eye = torch.tensor([1.5, 0.3, 1.3], device=dev)   # right side of scene, at robot height
+        fixed_target = robot_base                                # look directly at robot base
 
         # Cam 1: Wrist D405 looking slightly ahead from EE
         ee_pos = self.ee_pose_w[0, :3]
