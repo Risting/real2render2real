@@ -63,28 +63,15 @@ D405_INTRINSICS = [653.62, 0, 634.20, 0, 652.66, 343.31, 0, 0, 1]
 class UR7eBaseCfg(InteractiveSceneCfg):
     """Base scene: Robot1 (active) + Robot2 (static prop) + table + pillar + cameras."""
 
-    # Active robot (articulation with joints, mounted upside-down on pillar)
-    robot: ArticulationCfg = UR5E_CFG.replace(
-        prim_path="{ENV_REGEX_NS}/Robot1",
-        init_state=ArticulationCfg.InitialStateCfg(
-            pos=ROBOT1_POS,
-            rot=ROBOT1_ROT,
-            joint_pos={
-                "shoulder_pan_joint": 0.0,
-                "shoulder_lift_joint": -1.712,
-                "elbow_joint": 1.712,
-                "wrist_1_joint": 0.0,
-                "wrist_2_joint": 0.0,
-                "wrist_3_joint": 0.0,
-            },
-        ),
-    )
+    # Active robot (articulation with joints, pos/rot in UR5E_CFG)
+    robot: ArticulationCfg = UR5E_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot1")
 
     # Pillar
     pillar = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Pillar",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{data_dir}/assets/pillar/立柱装配体V2.5.usd",
+            scale=(0.01, 0.01, 0.01),   # CAD model likely in cm — convert to m
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
             pos=(PILLAR_X, PILLAR_Y, 0.0),
@@ -180,6 +167,7 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
         prim_path="{ENV_REGEX_NS}/chili",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{data_dir}/assets/object_scans/chili/chili.usdz",
+            scale=(0.1, 0.1, 0.1),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
             pos=(0.4, 0.0, TABLE_HEIGHT + 0.05),

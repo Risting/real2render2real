@@ -34,6 +34,8 @@ UR5E_CFG = ArticulationCfg(
         activate_contact_sensors=False,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
+        pos=(-0.15, 0.32, 1.29),          # robot base on pillar above table
+        rot=(1.0, 0.0, 0.0, 0.0),         # identity — from UR7E_2.usd reference
         joint_pos={
             "shoulder_pan_joint": 0.0,
             "shoulder_lift_joint": -1.712,
