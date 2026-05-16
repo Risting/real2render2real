@@ -88,14 +88,14 @@ class ChiliPick(IsaacLabViser):
             (self.scene.num_envs, 7), device=self.scene.env_origins.device
         )
 
-        # Camera extrinsics from hand-eye calibration
-        # Fixed D435I relative to robot base (world frame, already in meters)
+        # Camera extrinsics from UR7E_2.usd collected scene
+        # Fixed camera: /World/OverviewCamera world position
         self.T_base_cam_fixed = torch.tensor(
-            [0.122, -0.898, 0.451], device=self.scene.env_origins.device
+            [1.375, 1.198, 0.714], device=self.scene.env_origins.device
         )
-        # Wrist D405 relative to end-effector (meters)
+        # Wrist camera: /World/BODY/UR5E_R/AG_R/WristCamera offset from AG_R
         self.T_ee_cam_wrist = torch.tensor(
-            [-0.0057, -0.0619, 0.0401], device=self.scene.env_origins.device
+            [-0.084, -0.006, 0.005], device=self.scene.env_origins.device
         )
 
         self.run_simulator()
@@ -179,16 +179,15 @@ class ChiliPick(IsaacLabViser):
         """Set cam_0 (fixed D435I) and cam_1 (wrist D405) using eye/target pairs."""
         dev = self.scene.env_origins.device
 
-        # Cam 0: Fixed D435I — higher overview to see pillar + robot
+        # Cam 0: Fixed camera at /World/OverviewCamera position from UR7E_2.usd
         robot_base = self.robot.data.root_state_w[0, :3]
-        fixed_eye = torch.tensor([1.5, 0.3, 2.5], device=dev)   # right side, higher up
-        fixed_target = robot_base                                # look at robot base
+        fixed_eye = self.T_base_cam_fixed                        # (1.375, 1.198, 0.714)
+        fixed_target = torch.tensor([-0.4, 0.25, 0.4], device=dev)  # look at pillar/scene center
 
-        # Cam 1: Wrist D405 looking slightly ahead from EE
+        # Cam 1: Wrist camera at UR5E_R/AG_R/WristCamera offset from EE
         ee_pos = self.ee_pose_w[0, :3]
-        ee_forward = torch.tensor([0.0, 0.0, -0.3], device=dev)  # look 30cm forward (-Z in EE frame ≈ downward)
         wrist_eye = ee_pos + self.T_ee_cam_wrist
-        wrist_target = ee_pos + ee_forward
+        wrist_target = ee_pos + torch.tensor([0.0, 0.0, -0.2], device=dev)
 
         # Stack for all camera instances: [cam0, cam1]
         eyes = torch.stack([fixed_eye + self.scene.env_origins[0],

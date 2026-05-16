@@ -27,25 +27,23 @@ from real2render2real.isaaclab_viser.configs.articulation_configs.ur7e_cfg impor
     UR5E_CFG,
 )
 
-# --- Table dimensions ---
-TABLE_LENGTH = 1.2   # 120cm
-TABLE_WIDTH = 0.8    # 80cm
+# --- Table (same table2 as yumi/franka setups) ---
 TABLE_HEIGHT = 0.79  # 79cm to surface
 
-# --- Pillar position ---
-# Centered on the long axis (x=0), 8cm from one long edge
-PILLAR_X = 0.0
-PILLAR_Y = TABLE_WIDTH / 2 - 0.08  # 0.32m from center
+# --- Pillar: origin at (0,0,0), matches /World/BODY in UR7E_2.usd ---
+# CAD is in mm → scale 0.001 converts to m
+PILLAR_POS = (0.0, 0.0, 0.0)
 
-# --- Robot mounting on pillar ---
-# Extracted from UR7E_2.usd: rotation is IDENTITY (not upside-down).
-# Robot base on pillar, at table height + pillar offset.
-# CAD coords in reference are ~cm scale; we use meters scaled to our scene.
-ROBOT1_POS = (PILLAR_X - 0.15, PILLAR_Y, TABLE_HEIGHT + 0.5)
-ROBOT1_ROT = (1.0, 0.0, 0.0, 0.0)  # Identity — from UR7E_2.usd reference
+# --- Robot mounting ---
+# UR5E_L from UR7E_2.usd (world coords after BODY's unitsResolve=0.001):
+#   translate=(-720.82, 442.08, 768.02) mm → (-0.721, 0.442, 0.768) m
+#   orient=(-0.2184, 0.7409, 0.4885, 0.4059)
+ROBOT1_POS = (-0.721, 0.442, 0.768)
+ROBOT1_ROT = (-0.2184, 0.7409, 0.4885, 0.4059)
 
-ROBOT2_POS = (PILLAR_X + 0.15, PILLAR_Y, TABLE_HEIGHT + 0.5)
-ROBOT2_ROT = (1.0, 0.0, 0.0, 0.0)
+# UR5E_R from UR7E_2.usd (static prop):
+ROBOT2_POS = (-0.746, 0.065, 0.770)
+ROBOT2_ROT = (0.3083, 0.3086, 0.8318, -0.3433)
 
 # --- Camera intrinsics ---
 # D435I: 1920x1080 -> scaled to 1280x720
@@ -71,41 +69,39 @@ class UR7eBaseCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Pillar",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{data_dir}/assets/pillar/立柱装配体V2.5.usd",
-            scale=(0.01, 0.01, 0.01),   # CAD model likely in cm — convert to m
+            scale=(0.001, 0.001, 0.001),   # mm→m, matches BODY's unitsResolve
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(PILLAR_X, PILLAR_Y, 0.0),
+            pos=PILLAR_POS,
         ),
     )
 
-    # Table
-    table = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Table",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{data_dir}/assets/table2/table2_instanceable.usd",
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                retain_accelerations=False,
-                solver_position_iteration_count=8,
-                solver_velocity_iteration_count=0,
-                max_angular_velocity=1000.0,
-                max_linear_velocity=1000.0,
-                max_depenetration_velocity=5.0,
-                disable_gravity=False,
-            ),
+    # Second robot (UR5E_L, left arm — static visual prop)
+    robot2: ArticulationCfg = UR5E_CFG.replace(
+        prim_path="{ENV_REGEX_NS}/Robot2",
+        init_state=ArticulationCfg.InitialStateCfg(
+            pos=ROBOT2_POS,
+            rot=ROBOT2_ROT,
+            joint_pos={
+                "shoulder_pan_joint": 0.0,
+                "shoulder_lift_joint": -1.712,
+                "elbow_joint": 1.712,
+                "wrist_1_joint": 0.0,
+                "wrist_2_joint": 0.0,
+                "wrist_3_joint": 0.0,
+            },
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.2, 0.0, 0.0)),
     )
 
-    # Gripper (DH AG-95, attached to wrist_3_link at tool0 position)
-    # URDF tool0: offset (0, 0.1, 0) from wrist_3_link, rpy=(-90°, 0, 0)
-    gripper = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Robot1/wrist_3_link/gripper",
+    # SimpleRoom (floor, walls, table — from collected scene, replaces table2 + ground)
+    # Position matches /SimpleRoom in UR7E_2.usd
+    room = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Room",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{data_dir}/assets/gripper/dh_ag_95_base.usd",
+            usd_path=f"{data_dir}/omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Room/simple_room.usd",
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(0.0, 0.1, 0.0),
-            rot=(-0.7071, 0.7071, 0.0, 0.0),
+            pos=(-0.276, 0.231, 0.070),
         ),
     )
 
@@ -122,13 +118,6 @@ class UR7eBaseCfg(InteractiveSceneCfg):
             clipping_range=(0.01, 20),
         ),
         cams_per_env=2,
-    )
-
-    # Ground plane
-    ground = AssetBaseCfg(
-        prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.75)),
     )
 
     # Lighting
@@ -170,7 +159,7 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
             scale=(0.1, 0.1, 0.1),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(0.4, 0.0, TABLE_HEIGHT + 0.05),
+            pos=(0.4, 0.0, 0.05),          # just above table surface
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )
