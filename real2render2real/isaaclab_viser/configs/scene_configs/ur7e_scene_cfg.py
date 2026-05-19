@@ -1,16 +1,21 @@
 """UR5e chili pick scene configuration.
 
 Lab setup:
-- Two UR5e (proxy for UR7e) mounted upside-down on a structural pillar
-- Table: 120cm x 80cm, surface height 79cm
-- Pillar: 8cm from long edge, centered
-- Only Robot1 (left arm) is active, Robot2 is a static visual prop
-- Fixed camera: RealSense D435I
-- Wrist camera: RealSense D405
+- Two UR5e mounted on a structural pillar; only Robot1 is articulated
+- Pillar is mm-scale CAD, converted to meters via scale=(0.001, 0.001, 0.001)
+- Pillar internal CAD orientation corrected via post-spawn matrix (see base.py)
+- Robotiq 2F-85 gripper attached as a static mesh under wrist_3_link
+- SimpleRoom provides floor, walls, and built-in table
 
-Camera intrinsics from real cameras:
-  Fixed camera (D435I): 1920x1080, fx=1365.77, fy=1365.30
-  Wrist camera (D405): 1280x720, fx=653.62, fy=652.66
+Pillar Z derived from bbox measurements (see ur7e_scene_cfg_test.py for details):
+  pillar bbox min Z (scale 0.001) = 0.071727 m
+  SimpleRoom table top world Z = 0.0805 m
+  → PILLAR_Z = 0.0805 - 0.071727 = 0.0088 m
+
+Robot world positions:
+  world_pos = (PILLAR_X, PILLAR_Y, PILLAR_Z) + usda_translate * 0.001
+  UR5E_R: (-0.7458, 0.0652, 0.7786)
+  UR5E_L: (-0.7208, 0.4421, 0.7768)
 """
 
 import os
@@ -27,85 +32,71 @@ from real2render2real.isaaclab_viser.configs.articulation_configs.ur7e_cfg impor
     UR5E_CFG,
 )
 
-# --- Table (same table2 as yumi/franka setups) ---
-TABLE_HEIGHT = 0.79  # 79cm to surface
+# --- Pillar ---
+PILLAR_X = 0.0
+PILLAR_Y = 0.0
+PILLAR_Z = 0.0088   # pillar base sits on SimpleRoom table surface
 
-# --- Pillar: origin at (0,0,0), matches /World/BODY in UR7E_2.usd ---
-# CAD is in mm → scale 0.001 converts to m
-PILLAR_POS = (0.0, 0.0, 0.0)
+# --- Robot world positions (pillar Z + mm translate * 0.001) ---
+ROBOT1_POS = (-0.7458, 0.0652, 0.7786)
+ROBOT1_ROT = (0.30827, 0.30863, 0.83179, -0.34329)
 
-# --- Robot mounting ---
-# UR5E_L from UR7E_2.usd (world coords after BODY's unitsResolve=0.001):
-#   translate=(-720.82, 442.08, 768.02) mm → (-0.721, 0.442, 0.768) m
-#   orient=(-0.2184, 0.7409, 0.4885, 0.4059)
-ROBOT1_POS = (-0.721, 0.442, 0.768)
-ROBOT1_ROT = (-0.2184, 0.7409, 0.4885, 0.4059)
+ROBOT2_POS = (-0.7208, 0.4421, 0.7768)
+ROBOT2_ROT = (-0.21841, 0.74088, 0.48853, 0.40586)
 
-# UR5E_R from UR7E_2.usd (static prop):
-ROBOT2_POS = (-0.746, 0.065, 0.770)
-ROBOT2_ROT = (0.3083, 0.3086, 0.8318, -0.3433)
+# --- Gripper wrist-local mount (from PhysicsFixedJoint + base_link offset) ---
+GRIPPER_POS = (-0.00548, -0.00440, -0.02588)
+GRIPPER_ROT = (0.70710677, 0.0, 0.0, -0.70710677)
+
+# --- SimpleRoom position (verbatim from ur7e_test.usda) ---
+SIMPLE_ROOM_POS = (-0.2758352213446611, 0.2313240569149917, 0.07010507829325907)
 
 # --- Camera intrinsics ---
-# D435I: 1920x1080 -> scaled to 1280x720
-# fx_scaled = 1365.77 * (1280/1920) = 910.51
-# fy_scaled = 1365.30 * (720/1080) = 910.20
-# ppx_scaled = 966.83 * (1280/1920) = 644.55
-# ppy_scaled = 554.58 * (720/1080) = 369.72
 D435I_INTRINSICS_720 = [910.51, 0, 644.55, 0, 910.20, 369.72, 0, 0, 1]
-
-# D405: 1280x720 native
 D405_INTRINSICS = [653.62, 0, 634.20, 0, 652.66, 343.31, 0, 0, 1]
 
 
 @configclass
 class UR7eBaseCfg(InteractiveSceneCfg):
-    """Base scene: Robot1 (active) + Robot2 (static prop) + table + pillar + cameras."""
+    """Base scene: Robot1 (active) + Robot2 (static visual) + pillar + SimpleRoom + lights."""
 
-    # Active robot (articulation with joints, pos/rot in UR5E_CFG)
-    robot: ArticulationCfg = UR5E_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot1")
+    robot: ArticulationCfg = UR5E_CFG.replace(
+        prim_path="{ENV_REGEX_NS}/Robot1",
+        init_state=UR5E_CFG.init_state.replace(pos=ROBOT1_POS, rot=ROBOT1_ROT),
+    )
 
-    # Pillar
+    # Structural pillar; mm-scale CAD → meters via scale 0.001.
+    # Internal CAD orientation fixed by _apply_pillar_orientation in ChiliPick.
     pillar = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Pillar",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{data_dir}/assets/pillar/立柱装配体V2.5.usd",
-            scale=(0.001, 0.001, 0.001),   # mm→m, matches BODY's unitsResolve
+            scale=(0.001, 0.001, 0.001),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=PILLAR_POS,
+            pos=(PILLAR_X, PILLAR_Y, PILLAR_Z),
         ),
     )
 
-    # Second robot (UR5E_L, left arm — static visual prop)
-    robot2: ArticulationCfg = UR5E_CFG.replace(
-        prim_path="{ENV_REGEX_NS}/Robot2",
-        init_state=ArticulationCfg.InitialStateCfg(
-            pos=ROBOT2_POS,
-            rot=ROBOT2_ROT,
-            joint_pos={
-                "shoulder_pan_joint": 0.0,
-                "shoulder_lift_joint": -1.712,
-                "elbow_joint": 1.712,
-                "wrist_1_joint": 0.0,
-                "wrist_2_joint": 0.0,
-                "wrist_3_joint": 0.0,
-            },
+    # Second robot (UR5E_L, left arm — static visual only, no articulation)
+    robot2_visual = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot2_Visual",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{data_dir}/ur7e_description/ur5e/ur5e.usd",
         ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=ROBOT2_POS, rot=ROBOT2_ROT),
     )
 
-    # SimpleRoom (floor, walls, table — from collected scene, replaces table2 + ground)
-    # Position matches /SimpleRoom in UR7E_2.usd
-    room = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Room",
+    # SimpleRoom (floor, walls, table)
+    simple_room = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/SimpleRoom",
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{data_dir}/omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Room/simple_room.usd",
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(-0.276, 0.231, 0.070),
-        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=SIMPLE_ROOM_POS),
     )
 
-    # Cameras (2 per env: fixed D435I + wrist D405)
+    # Cameras (2 per env: cam_0 fixed + cam_1 wrist)
     viewport_camera = MultiTiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/Viewport",
         height=720,
@@ -131,19 +122,13 @@ class UR7eBaseCfg(InteractiveSceneCfg):
 
     dome_light2 = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Light2",
-        spawn=sim_utils.CylinderLightCfg(
-            intensity=200.0,
-            radius=1.0,
-        ),
+        spawn=sim_utils.CylinderLightCfg(intensity=200.0, radius=1.0),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.46, -0.64, 1.0)),
     )
 
     dome_light3 = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Light3",
-        spawn=sim_utils.CylinderLightCfg(
-            intensity=200.0,
-            radius=1.0,
-        ),
+        spawn=sim_utils.CylinderLightCfg(intensity=200.0, radius=1.0),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.46, 0.4, 1.0)),
     )
 
@@ -159,7 +144,7 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
             scale=(0.1, 0.1, 0.1),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(0.4, 0.0, 0.05),          # just above table surface
+            pos=(0.4, 0.0, 0.84),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )

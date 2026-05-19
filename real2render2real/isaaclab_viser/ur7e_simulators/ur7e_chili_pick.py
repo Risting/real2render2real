@@ -77,16 +77,24 @@ class ChiliPick(IsaacLabViser):
 
         super().__init__(simulation_app, scene_config, **kwargs)
 
+        # Fix pillar internal CAD orientation.
+        self._apply_pillar_orientation()
+
         self.isaac_viewport_camera = self.scene.sensors["viewport_camera"]
         self.camera_buffers = {"cam_0": deque(maxlen=1), "cam_1": deque(maxlen=1)}
 
         # Per-env XFormPrim for chili (kinematic, no physics needed)
-        self.chili_prims = [
-            XFormPrim(f"/World/envs/env_{i}/chili") for i in range(self.scene.num_envs)
-        ]
+        self.chili_prims = []
         self.chili_state = torch.zeros(
             (self.scene.num_envs, 7), device=self.scene.env_origins.device
         )
+        for i in range(self.scene.num_envs):
+            try:
+                self.chili_prims.append(
+                    XFormPrim(f"/World/envs/env_{i}/chili")
+                )
+            except Exception:
+                self.chili_prims.append(None)  # chili not in scene, skip
 
         # Camera extrinsics from UR7E_2.usd collected scene
         # Fixed camera: /World/OverviewCamera world position
@@ -99,6 +107,32 @@ class ChiliPick(IsaacLabViser):
         )
 
         self.run_simulator()
+
+    def _apply_pillar_orientation(self):
+        """Re-apply the orientation override from ur7e_test.usda onto the
+        pillar's internal CAD node. Without this the pillar renders tilted.
+        """
+        from pxr import Gf, UsdGeom
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        # Matrix copied verbatim from /World/BODY/tn__V25_V5xgg2sec0sYY0isSaiJ
+        # in ur7e_test.usda (the original collected scene).
+        mat = Gf.Matrix4d(
+             0.5054585783556504, -0.01564235936930266, -0.862709071564713,   0,
+             0.8614450409941848, -0.0479028782148914,   0.5055865461078429,  0,
+            -0.04923481403654982, -0.9987295083515333, -0.010737887813508283, 0,
+            -576.3422577523722,    710.4825268723347,    523.6951992568527,   1,
+        )
+        for env_idx in range(self.scene.num_envs):
+            pillar_path = f"/World/envs/env_{env_idx}/Pillar"
+            inner_path = pillar_path + "/tn__V25_V5xgg2sec0sYY0isSaiJ"
+            inner_prim = stage.GetPrimAtPath(inner_path)
+            if inner_prim.IsValid():
+                xf = UsdGeom.Xformable(inner_prim)
+                xf.ClearXformOpOrder()
+                op = xf.AddTransformOp()
+                op.Set(mat)
 
     def run_simulator(self):
         """Main simulation loop."""
@@ -254,6 +288,8 @@ class ChiliPick(IsaacLabViser):
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel)
 
     def _reset_object_state(self):
+        if self.chili_prims[0] is None:
+            return
         # Default chili position on the table (from scene config: pos=(0.4, 0.0, TABLE_HEIGHT+0.05))
         default_pos = torch.tensor(
             (0.4, 0.0, 0.84), device=self.scene.env_origins.device
@@ -363,6 +399,8 @@ class ChiliPick(IsaacLabViser):
 
     def _attach_chili(self):
         """Compute and store the offset from EE to chili for kinematic attachment."""
+        if self.chili_prims[0] is None:
+            return
         ee_pos = self.ee_pose_w[:, :3]          # world coords
         ee_quat = self.ee_pose_w[:, 3:7]        # world coords
         obj_pos = self.chili_state[:, :3] + self.scene.env_origins   # local -> world
@@ -379,6 +417,8 @@ class ChiliPick(IsaacLabViser):
 
     def _move_chili_with_ee(self):
         """Move chili pose to follow EE using stored offset."""
+        if self.chili_prims[0] is None:
+            return
         ee_pos = self.ee_pose_w[:, :3]
         ee_quat = self.ee_pose_w[:, 3:7]
 
