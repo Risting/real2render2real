@@ -79,6 +79,9 @@ class ChiliPick(IsaacLabViser):
 
         # Fix pillar internal CAD orientation.
         self._apply_pillar_orientation()
+        # Spawn gripper meshes AFTER articulation init, so they don't trigger
+        # the "multiple articulation" error during scene setup.
+        self._spawn_grippers()
 
         self.isaac_viewport_camera = self.scene.sensors["viewport_camera"]
         self.camera_buffers = {"cam_0": deque(maxlen=1), "cam_1": deque(maxlen=1)}
@@ -133,6 +136,61 @@ class ChiliPick(IsaacLabViser):
                 xf.ClearXformOpOrder()
                 op = xf.AddTransformOp()
                 op.Set(mat)
+
+    def _spawn_grippers(self):
+        """Spawn Robotiq grippers as static visual meshes AFTER the scene
+        articulation has been initialized, so there's no conflict."""
+        import omni.usd
+        from pxr import Gf, UsdGeom, UsdPhysics
+
+        import os as _os
+        # Same path resolution as scene config's data_dir
+        _dir = _os.path.dirname(_os.path.realpath(__file__))
+        data_dir = _os.path.join(_dir, "../../../data")
+        gripper_path = _os.path.abspath(_os.path.join(
+            data_dir, "assets/robotiq_2f_85/2F-85/Robotiq_2F_85_edit.usd"
+        ))
+        # Gripper local offsets from teammate's ur7e_scene_cfg_test.py
+        pos = (-0.00548, -0.00440, -0.02588)
+        rot = (0.70710677, 0.0, 0.0, -0.70710677)
+
+        stage = omni.usd.get_context().get_stage()
+        for env_idx in range(self.scene.num_envs):
+            for robot_name in ["Robot1", "Robot2_Visual"]:
+                parent_path = f"/World/envs/env_{env_idx}/{robot_name}/wrist_3_link"
+                gripper_prim_path = parent_path + "/gripper"
+
+                # Skip if already exists
+                if stage.GetPrimAtPath(gripper_prim_path).IsValid():
+                    continue
+
+                prim = UsdGeom.Xform.Define(stage, gripper_prim_path).GetPrim()
+                prim.GetReferences().AddReference(gripper_path)
+
+                # Set local transform
+                xf = UsdGeom.Xformable(prim)
+                xf.ClearXformOpOrder()
+                t_op = xf.AddTranslateOp()
+                t_op.Set(Gf.Vec3f(*pos))
+                r_op = xf.AddOrientOp()
+                r_op.Set(Gf.Quatf(rot[0], Gf.Vec3f(rot[1], rot[2], rot[3])))
+
+                # IMMEDIATELY strip articulation + rigid body APIs from all
+                # descendants before PhysX callbacks can fire
+                def _walk(pr):
+                    for c in pr.GetChildren():
+                        try:
+                            if c.HasAPI(UsdPhysics.ArticulationRootAPI):
+                                c.RemoveAPI(UsdPhysics.ArticulationRootAPI, "")
+                        except Exception:
+                            pass
+                        try:
+                            if c.HasAPI(UsdPhysics.RigidBodyAPI):
+                                c.RemoveAPI(UsdPhysics.RigidBodyAPI, "")
+                        except Exception:
+                            pass
+                        _walk(c)
+                _walk(prim)
 
     def run_simulator(self):
         """Main simulation loop."""
