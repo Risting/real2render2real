@@ -135,7 +135,7 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
             scale=(0.1, 0.1, 0.1),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(-0.35, 0.0, 0.11),         # within UR5e reach (~0.85m) from base at X=-0.746
+            pos=(-0.40, 0.05, 0.11),        # closer to robot arm for easier reach
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )

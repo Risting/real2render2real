@@ -99,14 +99,12 @@ class ChiliPick(IsaacLabViser):
             except Exception:
                 self.chili_prims.append(None)  # chili not in scene, skip
 
-        # Camera extrinsics from UR7E_2.usd collected scene
-        # Fixed camera: /World/OverviewCamera world position
+        # Camera extrinsics — original scene positions
         self.T_base_cam_fixed = torch.tensor(
             [1.375, 1.198, 0.714], device=self.scene.env_origins.device
         )
-        # Wrist camera: /World/BODY/UR5E_R/AG_R/WristCamera offset from AG_R
         self.T_ee_cam_wrist = torch.tensor(
-            [-0.084, -0.006, 0.005], device=self.scene.env_origins.device
+            [0.0, 0.0, 0.05], device=self.scene.env_origins.device
         )
 
         self.run_simulator()
@@ -377,6 +375,10 @@ class ChiliPick(IsaacLabViser):
         self.pick_state.chili_attached = False
         self.pick_state.chili_offset = None
 
+        # Reset IK warm-start so next solve seeds from home pose
+        if self.use_jaxmp:
+            self.controller.reset()
+
         self.randomize_lighting()
         self.randomize_viewaug()
 
@@ -397,8 +399,9 @@ class ChiliPick(IsaacLabViser):
         if self.chili_prims[0] is None:
             return
         # Table top world Z ≈ 0.0805, chili just above at 0.11
+        # Closer to robot arm: was (-0.25, 0.0), now (-0.40, 0.05) for easier reach
         default_pos = torch.tensor(
-            (-0.35, 0.0, 0.11), device=self.scene.env_origins.device
+            (-0.40, 0.05, 0.11), device=self.scene.env_origins.device
         )
         default_rot = torch.tensor(
             (1.0, 0.0, 0.0, 0.0), device=self.scene.env_origins.device
@@ -448,27 +451,29 @@ class ChiliPick(IsaacLabViser):
         cfg = self.pick_config
         offset = count - cfg.setup_phase_steps
 
-        # Get chili position (local coords)
-        obj_pos = self.chili_state[:, :3]
+        # Chili position in WORLD frame (local + env_origin)
+        chili_pos_world = self.chili_state[:, :3] + self.scene.env_origins
+
         if not hasattr(self, '_chili_debug_once'):
             self._chili_debug_once = True
-            print(f"[DEBUG chili] state={self.chili_state[0].tolist()}")
-            print(f"[DEBUG chili] prims[0] is None? {self.chili_prims[0] is None}")
+            root_pos = self.robot.data.root_state_w[0, :3]
+            print(f"[DEBUG] robot base world: {root_pos.tolist()}")
+            print(f"[DEBUG] chili world: {chili_pos_world[0].tolist()}")
 
-        # Determine target EE position
-        target_pos = obj_pos.clone()
+        # Compute target in WORLD frame (height offsets along world Z)
+        target_world = chili_pos_world.clone()
         gripper_closed = False
 
         if offset < cfg.approach_steps:
             # Phase 1: Approach from above
             t = self._smoothstep(offset / cfg.approach_steps)
-            target_pos[:, 2] += cfg.approach_height * (1 - t) + cfg.grasp_height * t
+            target_world[:, 2] += cfg.approach_height * (1 - t) + cfg.grasp_height * t
         elif offset < cfg.approach_steps + cfg.descend_steps:
             # Phase 2: Descend to grasp
-            target_pos[:, 2] += cfg.grasp_height
+            target_world[:, 2] += cfg.grasp_height
         elif offset < cfg.approach_steps + cfg.descend_steps + cfg.grasp_steps:
             # Phase 3: Grasp (close gripper)
-            target_pos[:, 2] += cfg.grasp_height
+            target_world[:, 2] += cfg.grasp_height
             gripper_closed = True
             grasp_step = offset - cfg.approach_steps - cfg.descend_steps
             if grasp_step == 0:
@@ -479,11 +484,11 @@ class ChiliPick(IsaacLabViser):
             t = self._smoothstep(
                 (offset - cfg.approach_steps - cfg.descend_steps - cfg.grasp_steps) / cfg.lift_steps
             )
-            target_pos[:, 2] += cfg.grasp_height * (1 - t) + cfg.lift_height * t
+            target_world[:, 2] += cfg.grasp_height * (1 - t) + cfg.lift_height * t
             gripper_closed = True
         else:
             # Phase 5: Hover at top
-            target_pos[:, 2] += cfg.lift_height
+            target_world[:, 2] += cfg.lift_height
             gripper_closed = True
 
         self.pick_state.gripper_closed = gripper_closed
@@ -492,34 +497,62 @@ class ChiliPick(IsaacLabViser):
         if self.pick_state.chili_attached and self.pick_state.chili_offset is not None:
             self._move_chili_with_ee()
 
-        # Compute joint positions via IK
-        if self.use_jaxmp:
-            joint_pos_des = self._solve_ik_jaxmp(target_pos, count)
-        else:
-            joint_pos_des = self._solve_ik_jacobian(target_pos)
+        # Transform target from WORLD frame to ROBOT BASE frame for IK.
+        # The IK solver expects targets in the robot's base link frame,
+        # not in world frame. The robot base is mounted on a pillar at
+        # ~0.78m height with non-trivial rotation.
+        root_pos_w = self.robot.data.root_state_w[:, :3]
+        root_quat_w = self.robot.data.root_state_w[:, 3:7]
+        target_identity_quat = torch.zeros_like(root_quat_w)
+        target_identity_quat[:, 0] = 1.0  # identity quaternion
+        target_pos_b, _ = subtract_frame_transforms(
+            root_pos_w, root_quat_w,
+            target_world, target_identity_quat,
+        )
 
-        # DEBUG: print first 3 IK results
+        # Compute joint positions via IK (target now in base frame)
+        if self.use_jaxmp:
+            joint_pos_des = self._solve_ik_jaxmp(target_pos_b, count)
+        else:
+            joint_pos_des = self._solve_ik_jacobian(target_pos_b)
+
+        # DEBUG: print IK target vs current EE for first 20 frames
         if not hasattr(self, '_ik_debug_count'):
             self._ik_debug_count = 0
-        if self._ik_debug_count < 3:
-            print(f"[DEBUG IK] count={count} target_pos={target_pos[0].tolist()}")
-            print(f"[DEBUG IK] joint_pos_des={joint_pos_des[0, :6].tolist()}")
-            print(f"[DEBUG IK] current_joint_pos={self.robot.data.joint_pos[0, :6].tolist()}")
+        if self._ik_debug_count < 20:
+            ee_pos_b, _ = self._get_ee_poses()
+            ik_error = torch.norm(target_pos_b[0] - ee_pos_b[0]).item()
+            print(f"[IK {self._ik_debug_count:2d}] count={count} offset={offset} phase={'G' if gripper_closed else 'O'}")
+            print(f"  target_world={target_world[0].tolist()}")
+            print(f"  target_base ={target_pos_b[0].tolist()}")
+            print(f"  ee_base     ={ee_pos_b[0].tolist()}")
+            print(f"  IK error    ={ik_error:.4f}m  joints_des={joint_pos_des[0,:3].tolist()}")
             self._ik_debug_count += 1
 
-        # Write joint positions (applied during next iteration's sim.render())
-        joint_vel = torch.zeros_like(joint_pos_des, device=self.robot.device)
-        self.robot.write_joint_state_to_sim(joint_pos_des, joint_vel)
+        # Use PD controller (same as Franka) instead of direct joint write.
+        # write_joint_state_to_sim() teleports the arm, causing IK jumps to
+        # manifest as self-collisions. set_joint_position_target() lets PhysX
+        # PD controller move smoothly toward the target.
+        self.robot.set_joint_position_target(joint_pos_des)
+        self.robot.write_data_to_sim()
 
     # ---- Chili attachment ----
 
     def _attach_chili(self):
-        """Compute and store the offset from EE to chili for kinematic attachment."""
+        """Compute and store the offset from EE to chili for kinematic attachment.
+        Only attaches if the EE is within 10cm of the chili.
+        """
         if self.chili_prims[0] is None:
             return
         ee_pos = self.ee_pose_w[:, :3]          # world coords
-        ee_quat = self.ee_pose_w[:, 3:7]        # world coords
         obj_pos = self.chili_state[:, :3] + self.scene.env_origins   # local -> world
+
+        dist = torch.norm(ee_pos - obj_pos, dim=-1)
+        if dist[0] > 0.10:
+            print(f"[WARN] Skip chili attach: EE-chili dist = {dist[0]:.4f}m (> 0.10m)")
+            return
+
+        ee_quat = self.ee_pose_w[:, 3:7]        # world coords
         obj_quat = self.chili_state[:, 3:7]                           # same in world
 
         # Compute offset in EE frame
@@ -530,6 +563,7 @@ class ChiliPick(IsaacLabViser):
         offset_tf = ee_tf.inverse() @ obj_tf
         self.pick_state.chili_offset = offset_tf.wxyz_xyz  # (N, 7)
         self.pick_state.chili_attached = True
+        print(f"[INFO] Chili attached! dist = {dist[0]:.4f}m")
 
     def _move_chili_with_ee(self):
         """Move chili pose to follow EE using stored offset."""
@@ -558,18 +592,24 @@ class ChiliPick(IsaacLabViser):
 
     # ---- IK solvers ----
 
-    def _solve_ik_jaxmp(self, target_pos, count):
-        """Solve IK using JaxMP differential IK controller."""
-        # Build target poses (N, 1, 7) in xyz_wxyz format
-        ee_quat_b = self._get_ee_poses()[1]
-        # Default EE orientation: gripper pointing down
-        down_quat = torch.tensor([1, 0, 0, 0], device=target_pos.device).unsqueeze(0).expand(
-            self.scene.num_envs, -1
-        )
+    def _solve_ik_jaxmp(self, target_pos_b, count):
+        """Solve IK using JaxMP differential IK controller.
+
+        Uses the CURRENT EE orientation as the IK orientation target
+        (position-only control). Specifying a fixed orientation like identity
+        or "world down" causes IK divergence because the UR5e is mounted on a
+        pillar with non-trivial base rotation, making the orientation constraint
+        incompatible with the position target.
+
+        Args:
+            target_pos_b: target EE position in ROBOT BASE frame (N, 3)
+        """
+        # Use current EE orientation — avoids orientation-induced IK divergence.
+        _, ee_quat_b = self._get_ee_poses()
 
         target_poses = np.zeros((self.scene.num_envs, 1, 7))
-        target_poses[:, 0, :3] = target_pos.cpu().numpy()
-        target_poses[:, 0, 3:] = down_quat.cpu().numpy()
+        target_poses[:, 0, :3] = target_pos_b.cpu().numpy()
+        target_poses[:, 0, 3:] = ee_quat_b.cpu().numpy()
 
         joints_jmp = self.controller.compute_ik(target_poses)
         joints = np.array(joints_jmp)
@@ -585,7 +625,7 @@ class ChiliPick(IsaacLabViser):
             self.robot.data.soft_joint_pos_limits[..., 1],
         )
 
-    def _solve_ik_jacobian(self, target_pos):
+    def _solve_ik_jacobian(self, target_pos_b):
         """Fallback IK using iterative Jacobian approach."""
         joint_pos = self.robot.data.joint_pos[:, :self.num_joints].clone()
         joint_pos_des = joint_pos.clone()
@@ -593,8 +633,8 @@ class ChiliPick(IsaacLabViser):
         step_size = 0.3
         for _ in range(3):
             self.robot.update(sim_dt=0.0)
-            ee_w = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], :3]
-            delta = target_pos - (ee_w - self.scene.env_origins)
+            ee_b, _ = self._get_ee_poses()
+            delta = target_pos_b - ee_b
             delta[:, 2] += self.pick_config.grasp_height
             joint_pos_des += step_size * delta.unsqueeze(1).expand(-1, self.num_joints) * 0.1
 
