@@ -268,8 +268,12 @@ class ChiliPick(IsaacLabViser):
             count += 1
             self.sim_step_time_ms.value = (time.time() - sim_start_time) * 1e3
             # Non-blocking viser client check (once per second)
-            if count % 60 == 0 and len(self.viser_server.get_clients()) > 0:
-                self.client = self.viser_server.get_clients()[0]
+            if count % 60 == 0:
+                clients = self.viser_server.get_clients()
+                if clients:
+                    self.client = list(clients.values())[0]
+                else:
+                    self.client = None
 
     # ---- EE tracking ----
 
@@ -357,6 +361,42 @@ class ChiliPick(IsaacLabViser):
         #    only refreshes during scene.reset(), producing identical frames.
         #    (Franka calls this in _update_sim_stats line 899.)
         self.isaac_viewport_camera.update(0, force_recompute=True)
+
+        # 4. Update viser visualization (robot URDF + camera images)
+        self._update_viser()
+
+    def _update_viser(self):
+        """Push robot state and camera images to viser for live visualization."""
+        if not self.init_viser:
+            return
+        if self.client is None:
+            return
+
+        # Update robot URDF in viser with current joint positions
+        for name in self.urdf_vis.keys():
+            robot = self.scene.articulations[name]
+            joint_dict = {
+                robot.data.joint_names[i]:
+                robot.data.joint_pos[self.env][i].item()
+                for i in range(len(robot.data.joint_pos[0]))
+            }
+            self.urdf_vis[name].update_cfg(joint_dict)
+
+        # Update base frame to match robot's world pose
+        root_pos = self.robot.data.root_state_w[self.env, :3].cpu().numpy()
+        root_quat = self.robot.data.root_state_w[self.env, 3:7].cpu().numpy()
+        self.base_frame.position = root_pos
+        self.base_frame.wxyz = root_quat
+
+        # Push camera image to viser GUI (cam_0 = fixed, cam_1 = wrist)
+        for cam_idx in range(min(2, self.isaac_viewport_camera.cfg.cams_per_env)):
+            buf_key = f"cam_{cam_idx}"
+            if buf_key in self.camera_buffers and len(self.camera_buffers[buf_key]) > 0:
+                cam_data = self.camera_buffers[buf_key][0]
+                if "rgb" in cam_data:
+                    img = cam_data["rgb"][self.env].cpu().numpy()
+                    if cam_idx == 0 and hasattr(self, 'isaac_viewport_viser_handle'):
+                        self.isaac_viewport_viser_handle.image = img
 
     # ---- Reset ----
 
