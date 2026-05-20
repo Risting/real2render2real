@@ -290,6 +290,17 @@ class ChiliPick(IsaacLabViser):
             ee_pose[:, 0:3], ee_pose[:, 3:7],
         )
 
+    # ---- Viser overrides ----
+
+    def _setup_viser_gui(self):
+        """Override to add cam_1 image widget alongside cam_0."""
+        super()._setup_viser_gui()
+        # Add cam_1 (wrist camera) image widget
+        with self.viser_server.gui.add_folder("Wrist Camera (cam_1)"):
+            self.viser_cam1_handle = self.viser_server.gui.add_image(
+                np.zeros((240, 320, 3))
+            )
+
     # ---- Camera ----
 
     def _set_data_camera_poses(self):
@@ -397,6 +408,8 @@ class ChiliPick(IsaacLabViser):
                     img = cam_data["rgb"][self.env].cpu().numpy()
                     if cam_idx == 0 and hasattr(self, 'isaac_viewport_viser_handle'):
                         self.isaac_viewport_viser_handle.image = img
+                    elif cam_idx == 1 and hasattr(self, 'viser_cam1_handle'):
+                        self.viser_cam1_handle.image = img
 
     # ---- Reset ----
 
