@@ -78,15 +78,6 @@ class UR7eBaseCfg(InteractiveSceneCfg):
         ),
     )
 
-    # Second robot (UR5E_L, left arm — static visual only, no articulation)
-    robot2_visual = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Robot2_Visual",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{data_dir}/ur7e_description/ur5e/ur5e.usd",
-        ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=ROBOT2_POS, rot=ROBOT2_ROT),
-    )
-
     # SimpleRoom (floor, walls, table)
     simple_room = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/SimpleRoom",
@@ -144,7 +135,7 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
             scale=(0.1, 0.1, 0.1),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(0.4, 0.0, 0.84),
+            pos=(-0.35, 0.0, 0.11),         # within UR5e reach (~0.85m) from base at X=-0.746
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )

@@ -156,7 +156,7 @@ class ChiliPick(IsaacLabViser):
 
         stage = omni.usd.get_context().get_stage()
         for env_idx in range(self.scene.num_envs):
-            for robot_name in ["Robot1", "Robot2_Visual"]:
+            for robot_name in ["Robot1"]:   # Robot2_Visual is static, skip gripper
                 parent_path = f"/World/envs/env_{env_idx}/{robot_name}/wrist_3_link"
                 gripper_prim_path = parent_path + "/gripper"
 
@@ -193,7 +193,19 @@ class ChiliPick(IsaacLabViser):
                 _walk(prim)
 
     def run_simulator(self):
-        """Main simulation loop."""
+        """Main simulation loop.
+
+        Loop structure matches the Franka CoffeeMaker pattern:
+        1. Read camera output (from PREVIOUS sim.render)
+        2. Set new camera poses + call sim.render() (produces output for NEXT iteration)
+        3. Sync robot state
+        4. Manipulate / setup (write joint targets)
+        5. Log data
+
+        GPU rendering is pipelined: camera sensor data from sim.render() is
+        only available on the NEXT call. Reading data.output immediately after
+        sim.render() returns stale data.
+        """
         # --- IK Controller ---
         self.robot_entity_cfg = SceneEntityCfg(
             "robot",
@@ -203,6 +215,7 @@ class ChiliPick(IsaacLabViser):
         self.robot_entity_cfg.resolve(self.scene)
 
         self.robot = list(self.scene.articulations.values())[0]
+        sim_dt = self.sim.get_physics_dt()
         self.all_joint_names = list(self.robot.data.joint_names)
         self.num_joints = len(self.all_joint_names)
         print(f"[INFO] Robot joints ({self.num_joints}): {self.all_joint_names}")
@@ -224,20 +237,30 @@ class ChiliPick(IsaacLabViser):
             print("[WARNING] No URDF found for JaxMP IK, falling back to Jacobian method")
 
         # --- Main loop ---
+        # Initialize EE poses before the first render (matches Franka pattern)
+        self.robot.update(sim_dt)
+        self._update_ee_poses()
+
         count = 0
-        sim_dt = self.sim.get_physics_dt()
         self.success_envs = None
 
         while self.simulation_app.is_running() and self.successful_envs.value < 100:
             sim_start_time = time.time()
 
+            # 1. Sync robot state BEFORE render (so wrist cam uses current EE pose)
+            self.robot.update(sim_dt)
             self._update_ee_poses()
+
+            # 2. Read camera output from PREVIOUS render, set new poses (using
+            #    fresh ee_pose_w), then render for NEXT iteration
             self._render_and_capture()
 
+            # 3. Reset if needed
             if count % self.pick_config.total_steps == 0:
                 self._handle_reset()
                 count = 0
 
+            # 4. Manipulate or setup (writes applied in next iteration's render)
             if count > self.pick_config.setup_phase_steps:
                 self._handle_manipulation(count)
                 self._log_data(count)
@@ -272,7 +295,6 @@ class ChiliPick(IsaacLabViser):
         dev = self.scene.env_origins.device
 
         # Cam 0: Fixed camera at /World/OverviewCamera position from UR7E_2.usd
-        robot_base = self.robot.data.root_state_w[0, :3]
         fixed_eye = self.T_base_cam_fixed                        # (1.375, 1.198, 0.714)
         fixed_target = torch.tensor([-0.4, 0.25, 0.4], device=dev)  # look at pillar/scene center
 
@@ -290,15 +312,21 @@ class ChiliPick(IsaacLabViser):
         self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
 
     def _render_and_capture(self):
-        self._set_data_camera_poses()
-        self.sim.render()
+        """Read camera output from previous step, set new camera poses,
+        then call sim.step(render=True) to step physics AND render.
+
+        Must use sim.step(render=True), NOT sim.render():
+          - sim.render() does NOT step physics in PARTIAL_RENDERING mode
+            (it sets playSimulations=False before app.update())
+          - sim.step(render=True) steps physics AND renders, so joint
+            writes are visible in the rendered frame
+
+        Reads data.output BEFORE sim.step() to handle GPU pipeline delay:
+        the sensor data from the current sim.step() is only available on
+        the next call.
+        """
+        # 1. Read camera output from PREVIOUS step (GPU pipeline delay)
         cam_output = self.isaac_viewport_camera.data.output
-        # Debug: check cam poses once
-        if not hasattr(self, '_debugged_poses'):
-            self._debugged_poses = True
-            cam0_pos = self.isaac_viewport_camera._view.get_world_poses()
-            print(f"[DEBUG] cam_0 world pos: {cam0_pos[0][0].tolist()}")
-            print(f"[DEBUG] cam_1 world pos: {cam0_pos[0][1].tolist()}")
         cams_per_env = self.isaac_viewport_camera.cfg.cams_per_env
         num_envs = self.scene.num_envs
 
@@ -311,6 +339,26 @@ class ChiliPick(IsaacLabViser):
             if buf_key not in self.camera_buffers:
                 self.camera_buffers[buf_key] = deque(maxlen=1)
             self.camera_buffers[buf_key].append(cam_data)
+
+        # Debug: check cam poses once (after set, before step)
+        if not hasattr(self, '_debugged_poses'):
+            self._debugged_poses = True
+            self._set_data_camera_poses()
+            cam0_pos = self.isaac_viewport_camera._view.get_world_poses()
+            print(f"[DEBUG] cam_0 world pos: {cam0_pos[0][0].tolist()}")
+            print(f"[DEBUG] cam_1 world pos: {cam0_pos[0][1].tolist()}")
+        else:
+            self._set_data_camera_poses()
+
+        # 2. Step physics + render (applies joint writes from previous
+        #    manipulation, produces sensor output for next iteration's read)
+        self.sim.step(render=True)
+
+        # 3. Force-refresh camera sensor data.output from GPU pipeline.
+        #    Without this, data.output never updates during the loop — it
+        #    only refreshes during scene.reset(), producing identical frames.
+        #    (Franka calls this in _update_sim_stats line 899.)
+        self.isaac_viewport_camera.update(0, force_recompute=True)
 
     # ---- Reset ----
 
@@ -348,9 +396,9 @@ class ChiliPick(IsaacLabViser):
     def _reset_object_state(self):
         if self.chili_prims[0] is None:
             return
-        # Default chili position on the table (from scene config: pos=(0.4, 0.0, TABLE_HEIGHT+0.05))
+        # Table top world Z ≈ 0.0805, chili just above at 0.11
         default_pos = torch.tensor(
-            (0.4, 0.0, 0.84), device=self.scene.env_origins.device
+            (-0.35, 0.0, 0.11), device=self.scene.env_origins.device
         )
         default_rot = torch.tensor(
             (1.0, 0.0, 0.0, 0.0), device=self.scene.env_origins.device
@@ -360,7 +408,7 @@ class ChiliPick(IsaacLabViser):
         base_rot = default_rot.expand(self.scene.num_envs, -1).clone()
 
         # Randomize chili XY position and Z rotation
-        random_xy = (torch.rand((self.scene.num_envs, 2), device=base_pos.device) * 2 - 1) * 0.06
+        random_xy = (torch.rand((self.scene.num_envs, 2), device=base_pos.device) * 2 - 1) * 0.03
         random_z_rot = torch.rand((self.scene.num_envs,), device=base_pos.device) * 2 * np.pi
 
         base_pos[:, 0] += random_xy[:, 0]
@@ -394,8 +442,6 @@ class ChiliPick(IsaacLabViser):
             self.robot.set_joint_position_target(joint_pos_target)
             self.robot.write_data_to_sim()
 
-        self.sim.step(render=False)
-
     # ---- Manipulation ----
 
     def _handle_manipulation(self, count: int):
@@ -404,6 +450,10 @@ class ChiliPick(IsaacLabViser):
 
         # Get chili position (local coords)
         obj_pos = self.chili_state[:, :3]
+        if not hasattr(self, '_chili_debug_once'):
+            self._chili_debug_once = True
+            print(f"[DEBUG chili] state={self.chili_state[0].tolist()}")
+            print(f"[DEBUG chili] prims[0] is None? {self.chili_prims[0] is None}")
 
         # Determine target EE position
         target_pos = obj_pos.clone()
@@ -415,7 +465,6 @@ class ChiliPick(IsaacLabViser):
             target_pos[:, 2] += cfg.approach_height * (1 - t) + cfg.grasp_height * t
         elif offset < cfg.approach_steps + cfg.descend_steps:
             # Phase 2: Descend to grasp
-            t = self._smoothstep((offset - cfg.approach_steps) / cfg.descend_steps)
             target_pos[:, 2] += cfg.grasp_height
         elif offset < cfg.approach_steps + cfg.descend_steps + cfg.grasp_steps:
             # Phase 3: Grasp (close gripper)
@@ -449,9 +498,18 @@ class ChiliPick(IsaacLabViser):
         else:
             joint_pos_des = self._solve_ik_jacobian(target_pos)
 
-        self.robot.set_joint_position_target(joint_pos_des)
-        self.robot.write_data_to_sim()
-        self.sim.step(render=False)
+        # DEBUG: print first 3 IK results
+        if not hasattr(self, '_ik_debug_count'):
+            self._ik_debug_count = 0
+        if self._ik_debug_count < 3:
+            print(f"[DEBUG IK] count={count} target_pos={target_pos[0].tolist()}")
+            print(f"[DEBUG IK] joint_pos_des={joint_pos_des[0, :6].tolist()}")
+            print(f"[DEBUG IK] current_joint_pos={self.robot.data.joint_pos[0, :6].tolist()}")
+            self._ik_debug_count += 1
+
+        # Write joint positions (applied during next iteration's sim.render())
+        joint_vel = torch.zeros_like(joint_pos_des, device=self.robot.device)
+        self.robot.write_joint_state_to_sim(joint_pos_des, joint_vel)
 
     # ---- Chili attachment ----
 
