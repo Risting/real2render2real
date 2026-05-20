@@ -28,7 +28,7 @@ def main():
 
     # URDF for JaxMP IK controller
     urdf_path = {
-        'robot': Path(f'{data_dir}/ur5e_robotiq/ur5e.urdf'),
+        'robot': Path(f'{data_dir}/ur5e_robotiq/ur5e_isaaclab.urdf'),
     }
 
     ChiliPick(
