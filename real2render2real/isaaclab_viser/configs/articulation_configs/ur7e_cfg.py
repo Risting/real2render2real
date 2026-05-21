@@ -35,12 +35,12 @@ UR5E_CFG = ArticulationCfg(
         pos=(-0.7458, 0.0652, 0.7786),               # UR5E_R world Z = PILLAR_Z(0.0088) + translate*0.001
         rot=(0.30827, 0.30863, 0.83179, -0.34329),  # UR5E_R xformOp:orient from ur7e_test.usda
         joint_pos={
-            "shoulder_pan_joint": 0.0,
-            "shoulder_lift_joint": -1.712,
-            "elbow_joint": 1.712,
-            "wrist_1_joint": 0.0,
-            "wrist_2_joint": 0.0,
-            "wrist_3_joint": 0.0,
+            "shoulder_pan_joint": 0.9694,
+            "shoulder_lift_joint": -2.4357,
+            "elbow_joint": 2.2427,
+            "wrist_1_joint": -0.5244,
+            "wrist_2_joint": -4.1204,
+            "wrist_3_joint": 1.6110,
         },
     ),
     actuators={

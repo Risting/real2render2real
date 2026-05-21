@@ -18,6 +18,9 @@ from real2render2real.isaaclab_viser.controllers.jaxmp_diff_ik_controller import
 import real2render2real.utils.transforms as tf
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms
+from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
+    get_fixed_cam_view, get_wrist_cam_view,
+)
 
 NUM_ARM_JOINTS = 6
 
@@ -34,7 +37,7 @@ class PickConfig:
 
     # EE height offsets relative to object (negative = above)
     approach_height: float = 0.15
-    grasp_height: float = 0.06     # tiger is taller than chili
+    grasp_height: float = 0.02
     lift_height: float = 0.25
 
     @property
@@ -79,18 +82,10 @@ class TigerPick(IsaacLabViser):
         # Access tiger via RigidObject API (kinematic, matches YuMi tiger config)
         self.tiger = self.scene.rigid_objects["tiger"]
         self.tiger_init_pos = torch.tensor(
-            (-0.40, 0.05, 0.085), device=self.scene.env_origins.device
+            (-0.40, 0.05, 0.12), device=self.scene.env_origins.device
         )
         self.tiger_init_rot = torch.tensor(
             (1.0, 0.0, 0.0, 0.0), device=self.scene.env_origins.device
-        )
-
-        # Camera extrinsics
-        self.T_base_cam_fixed = torch.tensor(
-            [1.375, 1.198, 0.714], device=self.scene.env_origins.device
-        )
-        self.T_ee_cam_wrist = torch.tensor(
-            [0.0, 0.0, 0.05], device=self.scene.env_origins.device
         )
 
         self.run_simulator()
@@ -258,19 +253,14 @@ class TigerPick(IsaacLabViser):
 
     def _set_data_camera_poses(self):
         dev = self.scene.env_origins.device
+        origin = self.scene.env_origins[0]
 
-        fixed_eye = self.T_base_cam_fixed
-        fixed_target = torch.tensor([-0.4, 0.25, 0.4], device=dev)
-
+        fixed_eye, fixed_target = get_fixed_cam_view(dev)
         ee_pos = self.ee_pose_w[0, :3]
-        wrist_eye = ee_pos + self.T_ee_cam_wrist
-        wrist_target = ee_pos + torch.tensor([0.0, 0.0, -0.2], device=dev)
+        wrist_eye, wrist_target = get_wrist_cam_view(ee_pos, dev)
 
-        eyes = torch.stack([fixed_eye + self.scene.env_origins[0],
-                           wrist_eye + self.scene.env_origins[0]], dim=0)
-        targets = torch.stack([fixed_target + self.scene.env_origins[0],
-                              wrist_target + self.scene.env_origins[0]], dim=0)
-
+        eyes = torch.stack([fixed_eye + origin, wrist_eye + origin], dim=0)
+        targets = torch.stack([fixed_target + origin, wrist_target + origin], dim=0)
         self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
 
     def _render_and_capture(self):

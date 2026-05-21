@@ -167,7 +167,7 @@ class UR7eTigerPickCfg(UR7eBaseCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.40, 0.05, 0.085),
+            pos=(-0.40, 0.05, 0.12),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )

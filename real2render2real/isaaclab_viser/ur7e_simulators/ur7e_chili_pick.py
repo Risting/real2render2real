@@ -23,6 +23,9 @@ from real2render2real.isaaclab_viser.controllers.jaxmp_diff_ik_controller import
 import real2render2real.utils.transforms as tf
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms
+from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
+    get_fixed_cam_view, get_wrist_cam_view,
+)
 from isaacsim.core.prims import XFormPrim
 
 NUM_ARM_JOINTS = 6
@@ -98,14 +101,6 @@ class ChiliPick(IsaacLabViser):
                 )
             except Exception:
                 self.chili_prims.append(None)  # chili not in scene, skip
-
-        # Camera extrinsics — original scene positions
-        self.T_base_cam_fixed = torch.tensor(
-            [1.375, 1.198, 0.714], device=self.scene.env_origins.device
-        )
-        self.T_ee_cam_wrist = torch.tensor(
-            [0.0, 0.0, 0.05], device=self.scene.env_origins.device
-        )
 
         self.run_simulator()
 
@@ -304,24 +299,16 @@ class ChiliPick(IsaacLabViser):
     # ---- Camera ----
 
     def _set_data_camera_poses(self):
-        """Set cam_0 (fixed D435I) and cam_1 (wrist D405) using eye/target pairs."""
+        """Set cam_0 (fixed D435I) and cam_1 (wrist D405)."""
         dev = self.scene.env_origins.device
+        origin = self.scene.env_origins[0]
 
-        # Cam 0: Fixed camera at /World/OverviewCamera position from UR7E_2.usd
-        fixed_eye = self.T_base_cam_fixed                        # (1.375, 1.198, 0.714)
-        fixed_target = torch.tensor([-0.4, 0.25, 0.4], device=dev)  # look at pillar/scene center
-
-        # Cam 1: Wrist camera at UR5E_R/AG_R/WristCamera offset from EE
+        fixed_eye, fixed_target = get_fixed_cam_view(dev)
         ee_pos = self.ee_pose_w[0, :3]
-        wrist_eye = ee_pos + self.T_ee_cam_wrist
-        wrist_target = ee_pos + torch.tensor([0.0, 0.0, -0.2], device=dev)
+        wrist_eye, wrist_target = get_wrist_cam_view(ee_pos, dev)
 
-        # Stack for all camera instances: [cam0, cam1]
-        eyes = torch.stack([fixed_eye + self.scene.env_origins[0],
-                           wrist_eye + self.scene.env_origins[0]], dim=0)
-        targets = torch.stack([fixed_target + self.scene.env_origins[0],
-                              wrist_target + self.scene.env_origins[0]], dim=0)
-
+        eyes = torch.stack([fixed_eye + origin, wrist_eye + origin], dim=0)
+        targets = torch.stack([fixed_target + origin, wrist_target + origin], dim=0)
         self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
 
     def _render_and_capture(self):
