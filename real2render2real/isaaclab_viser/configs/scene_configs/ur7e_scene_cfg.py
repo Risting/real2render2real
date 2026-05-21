@@ -20,7 +20,7 @@ Robot world positions:
 
 import os
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import MultiTiledCameraCfg
 from isaaclab.utils import configclass
@@ -136,6 +136,38 @@ class UR7eChiliPickCfg(UR7eBaseCfg):
         ),
         init_state=AssetBaseCfg.InitialStateCfg(
             pos=(-0.40, 0.05, 0.11),        # closer to robot arm for easier reach
+            rot=(1.0, 0.0, 0.0, 0.0),
+        ),
+    )
+
+
+@configclass
+class UR7eTigerPickCfg(UR7eBaseCfg):
+    """Tiger pick task: UR5e picks up a tiger plush toy from the table.
+
+    Tiger is loaded as a kinematic RigidObject (no dynamics), matching the
+    YumiTigerPickR2R2RCfg pattern. The simulator moves it via
+    write_root_state_to_sim for kinematic EE attachment during grasp.
+    """
+
+    tiger = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Tiger",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{data_dir}/assets/object_scans/tiger/tiger_new.usd",
+            scale=(1.1, 1.1, 1.1),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=True,
+                disable_gravity=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=False,
+            ),
+            articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                articulation_enabled=False,
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(-0.40, 0.05, 0.085),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
     )

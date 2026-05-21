@@ -1,12 +1,19 @@
 <robot name="ur5e">
   <!--
-    UR5e URDF for JaxMP IK - kinematic parameters from Isaac Sim official URDF.
-    Matches the USD model used in Isaac Lab simulation.
-    Mesh files not included - this URDF is for kinematic calculations only.
+    UR5e URDF for JaxMP IK + viser visualization.
+    Kinematic parameters from Isaac Sim official URDF (matches USD simulation model).
+    Mesh files from ur7e_description (place in data/ur5e_robotiq/meshes/).
   -->
 
   <!-- Base -->
-  <link name="base_link"/>
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/base_link.obj"/>
+      </geometry>
+    </visual>
+  </link>
 
   <link name="base_link_inertia">
     <inertial>
@@ -23,6 +30,12 @@
 
   <!-- Shoulder -->
   <link name="shoulder_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/shoulder_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="3.7"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -39,6 +52,12 @@
 
   <!-- Upper arm -->
   <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/upper_arm_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="8.393"/>
       <origin xyz="-0.2125 0 0.138" rpy="0 1.5707963 0"/>
@@ -55,6 +74,12 @@
 
   <!-- Forearm -->
   <link name="forearm_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/forearm_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="2.275"/>
       <origin xyz="-0.1961 0 0.007" rpy="0 1.5707963 0"/>
@@ -71,6 +96,12 @@
 
   <!-- Wrist 1 -->
   <link name="wrist_1_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/wrist_1_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="1.219"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -87,6 +118,12 @@
 
   <!-- Wrist 2 -->
   <link name="wrist_2_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/wrist_2_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="1.219"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -103,6 +140,12 @@
 
   <!-- Wrist 3 -->
   <link name="wrist_3_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../ur7e_description/meshes/obj/wrist_3_link.obj"/>
+      </geometry>
+    </visual>
     <inertial>
       <mass value="0.1879"/>
       <origin xyz="0 0 -0.0229" rpy="0 0 0"/>
