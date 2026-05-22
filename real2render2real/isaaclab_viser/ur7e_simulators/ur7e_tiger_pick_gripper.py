@@ -21,9 +21,9 @@ from real2render2real.isaaclab_viser.controllers.jaxmp_diff_ik_controller import
 )
 import real2render2real.utils.transforms as tf
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import subtract_frame_transforms
+from isaaclab.utils.math import subtract_frame_transforms, quat_mul, quat_apply
 from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
-    get_fixed_cam_view, get_wrist_cam_view,
+    get_fixed_cam_view, get_wrist_cam_offset,
 )
 
 NUM_ARM_JOINTS = 6
@@ -307,11 +307,15 @@ class TigerPickGripper(IsaacLabViser):
         origin = self.scene.env_origins[0]
 
         fixed_eye, fixed_target = get_fixed_cam_view(dev)
-        ee_pos = self.ee_pose_w[0, :3]
-        wrist_eye, wrist_target = get_wrist_cam_view(ee_pos, dev)
+        wrist_offset_pos, wrist_offset_quat = get_wrist_cam_offset(dev)
 
-        eyes = torch.stack([fixed_eye + origin, wrist_eye + origin], dim=0)
-        targets = torch.stack([fixed_target + origin, wrist_target + origin], dim=0)
+        ee_pos = self.ee_pose_w[0, :3]
+        ee_quat = self.ee_pose_w[0, 3:7]
+        wrist_pos = ee_pos + quat_apply(ee_quat, wrist_offset_pos)
+        wrist_quat = quat_mul(ee_quat, wrist_offset_quat)
+
+        eyes = torch.stack([fixed_eye + origin, wrist_pos + origin], dim=0)
+        targets = torch.stack([fixed_target + origin, wrist_pos + origin + quat_apply(wrist_quat, torch.tensor([0.0, 0.0, 0.2], device=dev))], dim=0)
         self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
 
     def _render_and_capture(self):
