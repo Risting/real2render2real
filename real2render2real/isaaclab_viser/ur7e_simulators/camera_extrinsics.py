@@ -8,8 +8,8 @@ import torch
 from isaaclab.utils.math import quat_from_matrix
 
 # --- Fixed camera: front view facing both arms and pillar (from +X direction) ---
-FIXED_CAM_EYE = [1.0, 0.2, 0.6]
-FIXED_CAM_TARGET = [-0.35, 0.2, 0.4]
+FIXED_CAM_EYE = [0.375, 0.125, 0.565]
+FIXED_CAM_TARGET = [-0.52, 0.125, 0.12]
 
 # T_ee_cam_end: wrist camera (D405) in end-effector frame
 WRIST_CAM_POS = [-0.007794556004586773, -0.06389298115559422, 0.03406491942741069]

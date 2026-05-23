@@ -83,7 +83,7 @@ class TigerPickGripper(IsaacLabViser):
 
         self.tiger = self.scene.rigid_objects["tiger"]
         self.tiger_init_pos = torch.tensor(
-            (-0.40, 0.05, 0.12), device=self.scene.env_origins.device
+            (-0.2, 0.1, 0.12), device=self.scene.env_origins.device
         )
         self.tiger_init_rot = torch.tensor(
             (1.0, 0.0, 0.0, 0.0), device=self.scene.env_origins.device
