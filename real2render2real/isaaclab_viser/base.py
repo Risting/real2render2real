@@ -135,8 +135,19 @@ class IsaacLabViser:
                 urdf, 
                 root_node_name="/base"
             )
-        default_joint_pos_dict = {self.scene.articulations['robot'].joint_names[i]: self.scene.articulations['robot'].data.default_joint_pos[0][i].item() for i in range(len(self.scene.articulations['robot'].data.default_joint_pos[0]))} 
-        self.urdf_vis['robot'].update_cfg(default_joint_pos_dict)
+        default_joint_pos_dict = {
+            self.scene.articulations['robot'].joint_names[i]:
+            self.scene.articulations['robot'].data.default_joint_pos[0][i].item()
+            for i in range(len(self.scene.articulations['robot'].data.default_joint_pos[0]))
+        }
+        # Only pass joints known to the URDF model (gripper joints etc. are articulation-only)
+        try:
+            urdf_joints = set(self.urdf['robot'].joint_map.keys())
+        except (AttributeError, TypeError):
+            urdf_joints = {j.name for j in self.urdf['robot'].joints}
+        known_joints = {k: v for k, v in default_joint_pos_dict.items()
+                        if k in urdf_joints}
+        self.urdf_vis['robot'].update_cfg(known_joints)
         
         self.camera_manager = CameraManager(self.viser_server, self.scene)
         self.use_viewport = len(self.camera_manager.frustums) == 0

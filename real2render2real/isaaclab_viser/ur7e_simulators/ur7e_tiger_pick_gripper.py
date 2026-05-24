@@ -1,11 +1,10 @@
-"""Tiger pick simulator with visual gripper open/close.
+"""Tiger pick simulator with flat-hierarchy articulated Robotiq 2F-85 gripper.
 
-Key difference from ur7e_tiger_pick.py:
-- Gripper open/close is done by rotating finger mesh prims directly (no physics)
-- This gives correct visual appearance for training data without needing
-  the gripper to be part of the articulation (which PhysX rejects due to
-  nested rigid body hierarchy constraints)
-- IK targets 6 arm joints; gripper is animated visually
+Uses ur5e_robotiq_flat.usd where gripper links are PEERS of arm links
+(not nested under wrist_3_link). A PhysicsFixedJoint connects wrist_3_link
+to the gripper base_link. PhysX sees a single articulation with all joints.
+
+Gripper open/close is done via set_joint_position_target like Franka.
 """
 
 from dataclasses import dataclass
@@ -22,13 +21,19 @@ from real2render2real.isaaclab_viser.controllers.jaxmp_diff_ik_controller import
 import real2render2real.utils.transforms as tf
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms, quat_mul, quat_apply
-from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
-    get_fixed_cam_view, get_wrist_cam_offset,
-)
+import os
+if os.environ.get("CAMERA_MODE") == "manual":
+    from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics_manual import (
+        get_fixed_cam_pose, get_wrist_cam_offset,
+    )
+else:
+    from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
+        get_fixed_cam_pose, get_wrist_cam_offset,
+    )
 
 NUM_ARM_JOINTS = 6
 FINGER_JOINT_OPEN = 0.0
-FINGER_JOINT_CLOSED = 0.7  # visual rotation in radians for finger prims
+FINGER_JOINT_CLOSED = 0.7  # radians (~40 deg), Robotiq finger_joint physical limit 0-75 deg
 
 
 @dataclass
@@ -76,7 +81,7 @@ class TigerPickGripper(IsaacLabViser):
         super().__init__(simulation_app, scene_config, **kwargs)
 
         self._apply_pillar_orientation()
-        self._spawn_grippers()
+        # No _spawn_grippers() — gripper is baked into the flat-hierarchy USD
 
         self.isaac_viewport_camera = self.scene.sensors["viewport_camera"]
         self.camera_buffers = {"cam_0": deque(maxlen=1), "cam_1": deque(maxlen=1)}
@@ -124,6 +129,17 @@ class TigerPickGripper(IsaacLabViser):
         self.all_joint_names = list(self.robot.data.joint_names)
         self.num_joints = len(self.all_joint_names)
         print(f"[INFO] Robot joints ({self.num_joints}): {self.all_joint_names}")
+
+        # Locate finger_joint index in articulation
+        self.finger_joint_idx = None
+        for i, name in enumerate(self.all_joint_names):
+            if name == "finger_joint":
+                self.finger_joint_idx = i
+                break
+        if self.finger_joint_idx is not None:
+            print(f"[INFO] finger_joint at index {self.finger_joint_idx} — gripper control ENABLED")
+        else:
+            print("[WARNING] finger_joint not found — gripper control DISABLED")
 
         urdf_path = self.urdf_path.get('robot') if self.urdf_path else None
         if urdf_path and Path(urdf_path).exists():
@@ -193,112 +209,12 @@ class TigerPickGripper(IsaacLabViser):
 
     # ---- Gripper control ----
 
-    def _spawn_grippers(self):
-        """Spawn Robotiq 2F-85 as static visual mesh under wrist_3_link."""
-        import omni.usd
-        from pxr import Gf, UsdGeom, UsdPhysics
-        import os as _os
-
-        _dir = _os.path.dirname(_os.path.realpath(__file__))
-        data_dir = _os.path.join(_dir, "../../../data")
-        gripper_path = _os.path.abspath(_os.path.join(
-            data_dir, "assets/robotiq_2f_85/2F-85/Robotiq_2F_85_edit.usd"
-        ))
-        pos = (-0.00548, -0.00440, -0.02588)
-        rot = (0.70710677, 0.0, 0.0, -0.70710677)
-
-        stage = omni.usd.get_context().get_stage()
-        self._gripper_finger_prims = []
-
-        for env_idx in range(self.scene.num_envs):
-            parent_path = f"/World/envs/env_{env_idx}/Robot1/wrist_3_link"
-            gripper_prim_path = parent_path + "/gripper"
-
-            if not stage.GetPrimAtPath(gripper_prim_path).IsValid():
-                prim = UsdGeom.Xform.Define(stage, gripper_prim_path).GetPrim()
-                prim.GetReferences().AddReference(gripper_path)
-
-                xf = UsdGeom.Xformable(prim)
-                xf.ClearXformOpOrder()
-                t_op = xf.AddTranslateOp()
-                t_op.Set(Gf.Vec3f(*pos))
-                r_op = xf.AddOrientOp()
-                r_op.Set(Gf.Quatf(rot[0], Gf.Vec3f(rot[1], rot[2], rot[3])))
-
-                def _walk(pr):
-                    for c in pr.GetChildren():
-                        try:
-                            if c.HasAPI(UsdPhysics.ArticulationRootAPI):
-                                c.RemoveAPI(UsdPhysics.ArticulationRootAPI)
-                        except Exception:
-                            pass
-                        try:
-                            if c.HasAPI(UsdPhysics.RigidBodyAPI):
-                                c.RemoveAPI(UsdPhysics.RigidBodyAPI)
-                        except Exception:
-                            pass
-                        _walk(c)
-                _walk(prim)
-
-            # Collect finger prim paths for visual animation
-            left_knuckle = stage.GetPrimAtPath(
-                gripper_prim_path + "/Robotiq_2F_85/left_outer_knuckle"
-            )
-            right_knuckle = stage.GetPrimAtPath(
-                gripper_prim_path + "/Robotiq_2F_85/right_outer_knuckle"
-            )
-            self._gripper_finger_prims.append((left_knuckle, right_knuckle))
-
-    def _animate_gripper(self, closed: bool):
-        """Visually rotate finger knuckle prims to simulate open/close.
-
-        Writes directly to Fabric (USDRT) which is what the renderer reads
-        during simulation. Plain pxr USD writes don't propagate to Fabric.
-        """
-        import math
-        import omni.usd
-        import usdrt
-
-        angle = FINGER_JOINT_CLOSED if closed else FINGER_JOINT_OPEN
-        cos_half = math.cos(angle / 2)
-        sin_half = math.sin(angle / 2)
-
-        if not hasattr(self, '_fabric_stage'):
-            self._fabric_stage = usdrt.Usd.Stage.Attach(
-                omni.usd.get_context().get_stage_id()
-            )
-
-        for left_knuckle, right_knuckle in self._gripper_finger_prims:
-            if left_knuckle and left_knuckle.IsValid():
-                path = left_knuckle.GetPath().pathString
-                rt_prim = self._fabric_stage.GetPrimAtPath(path)
-                if rt_prim:
-                    attr = rt_prim.GetAttribute("xformOp:orient")
-                    if attr:
-                        attr.Set(usdrt.Gf.Quatd(cos_half, 0, 0, sin_half))
-
-            if right_knuckle and right_knuckle.IsValid():
-                path = right_knuckle.GetPath().pathString
-                rt_prim = self._fabric_stage.GetPrimAtPath(path)
-                if rt_prim:
-                    attr = rt_prim.GetAttribute("xformOp:orient")
-                    if attr:
-                        attr.Set(usdrt.Gf.Quatd(cos_half, 0, 0, -sin_half))
-
     def _set_gripper_target(self, joint_pos_des: torch.Tensor, closed: bool):
-        """Animate gripper visually (no physics joint control needed)."""
-        if not hasattr(self, '_gripper_debug_done'):
-            self._gripper_debug_done = True
-            left, right = self._gripper_finger_prims[0]
-            from pxr import UsdGeom
-            if left and left.IsValid():
-                xf = UsdGeom.Xformable(left)
-                ops = xf.GetOrderedXformOps()
-                print(f"[GRIPPER DEBUG] left_knuckle path: {left.GetPath()}")
-                print(f"[GRIPPER DEBUG] xform ops: {[(op.GetOpName(), op.GetOpType()) for op in ops]}")
-            else:
-                print(f"[GRIPPER DEBUG] left_knuckle INVALID")
-        self._animate_gripper(closed)
+        """Set finger_joint position target via articulation physics."""
+        if self.finger_joint_idx is None:
+            return
+        target = FINGER_JOINT_CLOSED if closed else FINGER_JOINT_OPEN
+        joint_pos_des[:, self.finger_joint_idx] = target
 
     # ---- Camera ----
 
@@ -306,7 +222,7 @@ class TigerPickGripper(IsaacLabViser):
         dev = self.scene.env_origins.device
         origin = self.scene.env_origins[0]
 
-        fixed_eye, fixed_target = get_fixed_cam_view(dev)
+        fixed_pos, fixed_quat = get_fixed_cam_pose(dev)
         wrist_offset_pos, wrist_offset_quat = get_wrist_cam_offset(dev)
 
         ee_pos = self.ee_pose_w[0, :3]
@@ -314,9 +230,9 @@ class TigerPickGripper(IsaacLabViser):
         wrist_pos = ee_pos + quat_apply(ee_quat, wrist_offset_pos)
         wrist_quat = quat_mul(ee_quat, wrist_offset_quat)
 
-        eyes = torch.stack([fixed_eye + origin, wrist_pos + origin], dim=0)
-        targets = torch.stack([fixed_target + origin, wrist_pos + origin + quat_apply(wrist_quat, torch.tensor([0.0, 0.0, 0.2], device=dev))], dim=0)
-        self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
+        positions = torch.stack([fixed_pos + origin, wrist_pos + origin], dim=0)
+        orientations = torch.stack([fixed_quat, wrist_quat], dim=0)
+        self.isaac_viewport_camera.set_world_poses(positions, orientations, convention="ros")
 
     def _render_and_capture(self):
         cam_output = self.isaac_viewport_camera.data.output
@@ -348,11 +264,16 @@ class TigerPickGripper(IsaacLabViser):
             return
         for name in self.urdf_vis.keys():
             robot = self.scene.articulations[name]
-            joint_dict = {
-                robot.data.joint_names[i]:
-                robot.data.joint_pos[self.env][i].item()
-                for i in range(len(robot.data.joint_pos[0]))
-            }
+            # Only pass joints known to the URDF model (skip gripper joints)
+            joint_dict = {}
+            try:
+                urdf_joints = set(self.urdf[name].joint_map.keys())
+            except (AttributeError, TypeError):
+                urdf_joints = {j.name for j in self.urdf[name].joints}
+            for i in range(len(robot.data.joint_pos[0])):
+                jname = robot.data.joint_names[i]
+                if jname in urdf_joints:
+                    joint_dict[jname] = robot.data.joint_pos[self.env][i].item()
             self.urdf_vis[name].update_cfg(joint_dict)
 
         root_pos = self.robot.data.root_state_w[self.env, :3].cpu().numpy()

@@ -1,6 +1,6 @@
-"""Configuration for UR5e + Robotiq 2F-85 as a single articulation.
+"""Configuration for UR5e + Robotiq 2F-85 as a single flat-hierarchy articulation.
 
-Uses the merged USD from export_ur5e_robotiq_articulated.py.
+Uses the flat USD from export_ur5e_robotiq_flat.py.
 Joints: 6 arm + finger_joint (1-DOF gripper, mimic joints follow automatically).
 """
 
@@ -14,7 +14,7 @@ _data_dir = os.path.join(_dir_path, "../../../../data")
 
 UR5E_ROBOTIQ_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=os.path.join(_data_dir, "ur7e_description/scenes/ur5e_robotiq_articulated.usd"),
+        usd_path=os.path.join(_data_dir, "ur7e_description/scenes/ur5e_robotiq_flat.usd"),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             max_depenetration_velocity=5.0,

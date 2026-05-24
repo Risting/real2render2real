@@ -1,7 +1,8 @@
-"""Launch UR7e tiger pick with articulated Robotiq gripper.
+"""Launch UR7e tiger pick with flat-hierarchy articulated Robotiq gripper.
 
 Run on cloud server:
-    /root/isaacsim/python.sh gpufree-data/r2r2r/scripts/run_ur7e_tiger_gripper.py
+    cd /root/gpufree-data/r2r2r/dependencies/IsaacLab
+    ./isaaclab.sh -p /root/gpufree-data/r2r2r/scripts/run_ur7e_tiger_gripper.py
 """
 import argparse
 from isaaclab.app import AppLauncher
@@ -14,7 +15,9 @@ print(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-from real2render2real.isaaclab_viser.configs.scene_configs.ur7e_scene_cfg import UR7eTigerPickCfg
+from real2render2real.isaaclab_viser.configs.scene_configs.ur5e_robotiq_tiger_cfg import (
+    UR5eRobotiqTigerPickCfg,
+)
 from real2render2real.isaaclab_viser.ur7e_simulators.ur7e_tiger_pick_gripper import (
     TigerPickGripper,
 )
@@ -28,7 +31,7 @@ def main():
     data_dir = os.path.join(dir_path, "../data")
     output_data_dir = os.path.join(dir_path, "../output_data")
 
-    scene_config = UR7eTigerPickCfg(num_envs=1, env_spacing=2.0)
+    scene_config = UR5eRobotiqTigerPickCfg(num_envs=1, env_spacing=2.0)
     output_dir = os.path.join(output_data_dir, "ur7e_tiger_pick_gripper")
 
     urdf_path = {

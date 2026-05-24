@@ -23,9 +23,15 @@ from real2render2real.isaaclab_viser.controllers.jaxmp_diff_ik_controller import
 import real2render2real.utils.transforms as tf
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms, quat_mul, quat_apply
-from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
-    get_fixed_cam_view, get_wrist_cam_offset,
-)
+import os
+if os.environ.get("CAMERA_MODE") == "manual":
+    from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics_manual import (
+        get_fixed_cam_pose, get_wrist_cam_offset,
+    )
+else:
+    from real2render2real.isaaclab_viser.ur7e_simulators.camera_extrinsics import (
+        get_fixed_cam_pose, get_wrist_cam_offset,
+    )
 from isaacsim.core.prims import XFormPrim
 
 NUM_ARM_JOINTS = 6
@@ -303,7 +309,7 @@ class ChiliPick(IsaacLabViser):
         dev = self.scene.env_origins.device
         origin = self.scene.env_origins[0]
 
-        fixed_eye, fixed_target = get_fixed_cam_view(dev)
+        fixed_pos, fixed_quat = get_fixed_cam_pose(dev)
         wrist_offset_pos, wrist_offset_quat = get_wrist_cam_offset(dev)
 
         ee_pos = self.ee_pose_w[0, :3]
@@ -311,9 +317,9 @@ class ChiliPick(IsaacLabViser):
         wrist_pos = ee_pos + quat_apply(ee_quat, wrist_offset_pos)
         wrist_quat = quat_mul(ee_quat, wrist_offset_quat)
 
-        eyes = torch.stack([fixed_eye + origin, wrist_pos + origin], dim=0)
-        targets = torch.stack([fixed_target + origin, wrist_pos + origin + quat_apply(wrist_quat, torch.tensor([0.0, 0.0, 0.2], device=dev))], dim=0)
-        self.isaac_viewport_camera.set_world_poses_from_view(eyes, targets)
+        positions = torch.stack([fixed_pos + origin, wrist_pos + origin], dim=0)
+        orientations = torch.stack([fixed_quat, wrist_quat], dim=0)
+        self.isaac_viewport_camera.set_world_poses(positions, orientations, convention="ros")
 
     def _render_and_capture(self):
         """Read camera output from previous step, set new camera poses,
