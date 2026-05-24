@@ -45,9 +45,9 @@ class PickConfig:
     lift_steps: int = 25
     hover_steps: int = 10
 
-    approach_height: float = 0.15
-    grasp_height: float = 0.02
-    lift_height: float = 0.25
+    approach_height: float = 0.28
+    grasp_height: float = 0.134   # wrist_3_link → gripper fingertip distance
+    lift_height: float = 0.38
 
     @property
     def grasp_start(self) -> int:
