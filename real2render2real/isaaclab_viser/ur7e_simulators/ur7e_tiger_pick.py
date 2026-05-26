@@ -29,6 +29,7 @@ else:
     )
 
 NUM_ARM_JOINTS = 6
+GRIPPER_LENGTH = 0.134    # wrist_3_link → gripper fingertip centre
 
 
 @dataclass
@@ -42,9 +43,9 @@ class PickConfig:
     hover_steps: int = 10
 
     # EE height offsets relative to object (negative = above)
-    approach_height: float = 0.28
-    grasp_height: float = 0.134   # wrist_3_link → gripper fingertip distance
-    lift_height: float = 0.38
+    approach_height: float = 0.25
+    grasp_height: float = 0.114   # fingertip ~2cm below tiger centre → tiger inside grip
+    lift_height: float = 0.35
 
     @property
     def grasp_start(self) -> int:

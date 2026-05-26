@@ -264,6 +264,24 @@ def slerp_with_clip(q0, q1, alpha, max_angle_rad):
         result = (q0 * s0.unsqueeze(-1)) + (q1 * s1.unsqueeze(-1))
         return quaternion_normalize(result)
 
+def quat_rotate_vector(q, v):
+    """Rotate 3D vector(s) by quaternion(s).
+
+    Args:
+        q: Quaternion in wxyz format, shape (..., 4)
+        v: Vector in xyz format, shape (..., 3)
+
+    Returns:
+        Rotated vector, shape (..., 3)
+    """
+    q_w, q_x, q_y, q_z = q.unbind(-1)
+    # v_rot = v + 2 * cross(q_xyz, cross(q_xyz, v) + q_w * v)
+    q_xyz = torch.stack([q_x, q_y, q_z], dim=-1)
+    cross1 = torch.cross(q_xyz, v, dim=-1)
+    cross2 = torch.cross(q_xyz, cross1 + q_w.unsqueeze(-1) * v, dim=-1)
+    return v + 2.0 * cross2
+
+
 def wrap_to_pi(angles):
     """
     angles: Tensor of Euler angles, in radians

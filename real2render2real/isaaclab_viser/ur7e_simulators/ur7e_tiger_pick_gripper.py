@@ -34,6 +34,7 @@ else:
 NUM_ARM_JOINTS = 6
 FINGER_JOINT_OPEN = 0.0
 FINGER_JOINT_CLOSED = 0.7  # radians (~40 deg), Robotiq finger_joint physical limit 0-75 deg
+GRIPPER_LENGTH = 0.134    # wrist_3_link → gripper fingertip centre (total: mount + body)
 
 
 @dataclass
@@ -45,9 +46,9 @@ class PickConfig:
     lift_steps: int = 25
     hover_steps: int = 10
 
-    approach_height: float = 0.28
-    grasp_height: float = 0.134   # wrist_3_link → gripper fingertip distance
-    lift_height: float = 0.38
+    approach_height: float = 0.25
+    grasp_height: float = 0.114   # fingertip ~2cm below tiger centre → tiger inside grip
+    lift_height: float = 0.35
 
     @property
     def grasp_start(self) -> int:
@@ -411,7 +412,6 @@ class TigerPickGripper(IsaacLabViser):
         else:
             joint_pos_des = self._solve_ik_jacobian(target_pos_b)
 
-        # Set gripper target on the full joint vector
         self._set_gripper_target(joint_pos_des, closed=gripper_closed)
 
         self.robot.set_joint_position_target(joint_pos_des)
