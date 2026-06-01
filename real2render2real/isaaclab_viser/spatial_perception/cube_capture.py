@@ -1,9 +1,6 @@
 """Spatial perception cube capture simulator.
 
-Places a red cube at random positions within a defined 3D volume, captures images
-from two fixed cameras, and saves them alongside the cube's world coordinates.
-
-Uses AssetBaseCfg cube (no physics) + USD xform update (no ClearXformOpOrder).
+Both robot arms are ArticulationCfg with teach-pendant joint angles.
 """
 
 import os
@@ -24,10 +21,13 @@ from real2render2real.isaaclab_viser.spatial_perception.camera_extrinsics import
 class SpatialCubeCapture:
     """Standalone simulator for capturing spatial perception dataset images."""
 
-    # Cube placement volume (world coordinates, metres)
     VOLUME_X = (-0.55, -0.25)
     VOLUME_Y = (-0.05,  0.35)
     VOLUME_Z = ( 0.11,  0.35)
+
+    # Teach-pendant joint angles (deg)
+    ROBOT1_JOINT_DEG = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
+    ROBOT2_JOINT_DEG = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
 
     def __init__(self, simulation_app, scene_config, output_dir, num_samples=2000):
         self.simulation_app = simulation_app
@@ -46,11 +46,10 @@ class SpatialCubeCapture:
         self.sim.reset()
 
         self._apply_pillar_orientation()
-        self._hold_robot_arms()
+        self._set_robot_poses()
 
         self.camera = self.scene.sensors["viewport_camera"]
         self.device = self.scene.env_origins.device
-
         self.cube_prim_path = "/World/envs/env_0/Cube"
 
         os.makedirs(os.path.join(output_dir, "cam_0"), exist_ok=True)
@@ -58,7 +57,7 @@ class SpatialCubeCapture:
         self.labels = np.zeros((num_samples, 3), dtype=np.float32)
 
         # Warmup renders
-        self._hold_robot_arms()
+        self._set_robot_poses()
         cam_positions, cam_orientations = get_fixed_cam_poses(self.device)
         self.camera.set_world_poses(cam_positions, cam_orientations, convention="ros")
         self.sim.step(render=True)
@@ -94,18 +93,31 @@ class SpatialCubeCapture:
                 op.Set(mat)
 
     # ------------------------------------------------------------------
-    # Robot arms — hold default pose against gravity
+    # Robot arms — both at teach-pendant pose
     # ------------------------------------------------------------------
 
-    def _hold_robot_arms(self):
-        for art in self.scene.articulations.values():
+    def _set_robot_poses(self):
+        """Robot1: teach-pendant pose.  Robot2: mirrored (negated joints)."""
+        targets = {
+            "robot":  self.ROBOT1_JOINT_DEG,
+            "robot2": self.ROBOT2_JOINT_DEG,
+        }
+        for name, deg in targets.items():
+            art = self.scene.articulations.get(name)
+            if art is None:
+                continue
+            joint_pos = art.data.default_joint_pos.clone()
+            target_rad = torch.tensor(
+                [np.deg2rad(a) for a in deg],
+                device=joint_pos.device, dtype=joint_pos.dtype,
+            )
+            joint_pos[0, :6] = target_rad
             art.write_joint_state_to_sim(
-                art.data.default_joint_pos.clone(),
-                art.data.default_joint_vel.clone(),
+                joint_pos, art.data.default_joint_vel.clone()
             )
 
     # ------------------------------------------------------------------
-    # Cube placement — update existing translate op only (no clear)
+    # Cube placement
     # ------------------------------------------------------------------
 
     def _random_cube_position(self):
@@ -132,7 +144,6 @@ class SpatialCubeCapture:
                 op.Set(Gf.Vec3d(float(local[0]), float(local[1]), float(local[2])))
                 return
 
-        # Fallback: no existing translate op, add one without clearing
         op = xformable.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble)
         op.Set(Gf.Vec3d(float(local[0]), float(local[1]), float(local[2])))
 
@@ -173,8 +184,8 @@ class SpatialCubeCapture:
         pos = self._random_cube_position()
         self._set_cube_position(pos)
 
+        self._set_robot_poses()
         self._set_camera_poses()
-        self._hold_robot_arms()
 
         self.sim.step(render=True)
         self.camera.update(0, force_recompute=True)
@@ -183,7 +194,6 @@ class SpatialCubeCapture:
         img0 = rgb[0].cpu().numpy()
         img1 = rgb[1].cpu().numpy()
 
-        # Flip images vertically — camera Y axis maps to world +Z instead of -Z
         img0 = np.flipud(img0)
         img1 = np.flipud(img1)
 
