@@ -46,6 +46,7 @@ class SpatialCubeCapture:
         self.sim.reset()
 
         self._apply_pillar_orientation()
+        self._hold_robot_arms()
 
         self.camera = self.scene.sensors["viewport_camera"]
         self.device = self.scene.env_origins.device
@@ -57,6 +58,7 @@ class SpatialCubeCapture:
         self.labels = np.zeros((num_samples, 3), dtype=np.float32)
 
         # Warmup renders
+        self._hold_robot_arms()
         cam_positions, cam_orientations = get_fixed_cam_poses(self.device)
         self.camera.set_world_poses(cam_positions, cam_orientations, convention="ros")
         self.sim.step(render=True)
@@ -92,6 +94,17 @@ class SpatialCubeCapture:
                 op.Set(mat)
 
     # ------------------------------------------------------------------
+    # Robot arms — hold default pose against gravity
+    # ------------------------------------------------------------------
+
+    def _hold_robot_arms(self):
+        for art in self.scene.articulations.values():
+            art.write_joint_state_to_sim(
+                art.data.default_joint_pos.clone(),
+                art.data.default_joint_vel.clone(),
+            )
+
+    # ------------------------------------------------------------------
     # Cube placement — update existing translate op only (no clear)
     # ------------------------------------------------------------------
 
@@ -118,6 +131,10 @@ class SpatialCubeCapture:
             if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
                 op.Set(Gf.Vec3d(float(local[0]), float(local[1]), float(local[2])))
                 return
+
+        # Fallback: no existing translate op, add one without clearing
+        op = xformable.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble)
+        op.Set(Gf.Vec3d(float(local[0]), float(local[1]), float(local[2])))
 
     # ------------------------------------------------------------------
     # Camera + render
@@ -157,6 +174,7 @@ class SpatialCubeCapture:
         self._set_cube_position(pos)
 
         self._set_camera_poses()
+        self._hold_robot_arms()
 
         self.sim.step(render=True)
         self.camera.update(0, force_recompute=True)

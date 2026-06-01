@@ -1,6 +1,6 @@
 """Camera extrinsics for UR7e simulation cameras.
 
-Source: sim_data/eye_hand/calibration_result_522.json (2026-05-22, tsai, 30 valid samples)
+Source: sim_data/eye_hand/calibration_result_61.json (2026-06-01, tsai, 50/50 valid samples)
 
 Coordinate frame chain:
   T_world_cam = T_world_blInertia @ T_blInertia_cam
@@ -18,16 +18,16 @@ from isaaclab.utils.math import quat_from_matrix
 # Computed from calibration T_base_cam_fixed in base_link_inertia frame,
 # converted to world via R_world_blInertia = R_world_baseLink @ Rz(pi).
 # base_pos=(-0.7458,0.0652,0.7786), base_quat=(0.30827,0.30863,0.83179,-0.34329)[wxyz]
-FIXED_CAM_POS = [0.118614, 0.202063, 0.272201]
+FIXED_CAM_POS = [0.110814, 0.198867, 0.267785]
 # Full rotation from calibration, converted to world. ROS/OpenCV convention.
-FIXED_CAM_QUAT_WXYZ = [-0.365599, 0.509038, 0.578491, -0.522079]
+FIXED_CAM_QUAT_WXYZ = [-0.371358, 0.515038, 0.573580, -0.517527]
 
-# T_ee_cam_end: wrist camera (D405) in end-effector frame (from calibration)
-WRIST_CAM_POS = [-0.007794556004586773, -0.06389298115559422, 0.03406491942741069]
+# T_ee_cam_end: wrist camera (D405) in end-effector frame (from calibration 61)
+WRIST_CAM_POS = [-0.007263472445299419, -0.06243658543806627, -0.1507997443408004]
 WRIST_CAM_ROT = [
-    [0.99992300522118, 0.005563967687790656, -0.011091703792162127],
-    [-0.005109956798740268, 0.9991644914183526, 0.04054882772929301],
-    [0.01130804894572226, -0.04048902755406822, 0.9991159926038453],
+    [0.9991263436947527, 0.03907170953576453, -0.014830740005405345],
+    [-0.038427258140137734, 0.998399255332287, 0.04150027450229563],
+    [0.016428486448431645, -0.04089411285121023, 0.9990284161960191],
 ]
 
 

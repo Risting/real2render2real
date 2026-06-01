@@ -1,15 +1,17 @@
-"""Spatial perception scene: SimpleRoom + pillar + red cube + 2 fixed cameras.
-
-No robot — just a static scene with a randomly-placed cube and two cameras
-capturing stereo-like views for spatial perception training data.
+"""Spatial perception scene: SimpleRoom + pillar + robot arms + red cube + 2 fixed cameras.
 """
 
 import os
 import isaaclab.sim as sim_utils
-from isaaclab.assets import AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import MultiTiledCameraCfg
 from isaaclab.utils import configclass
+
+from real2render2real.isaaclab_viser.configs.articulation_configs.ur7e_cfg import UR5E_CFG
+from real2render2real.isaaclab_viser.configs.articulation_configs.ur5e_robotiq_cfg import (
+    UR5E_ROBOTIQ_CFG,
+)
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 data_dir = os.path.join(dir_path, "../../../../data")
@@ -17,21 +19,42 @@ data_dir = os.path.join(dir_path, "../../../../data")
 # --- Pillar ---
 PILLAR_X = 0.0
 PILLAR_Y = 0.0
-PILLAR_Z = 0.0088   # pillar base sits on SimpleRoom table surface
+PILLAR_Z = 0.0088
 
-# --- SimpleRoom position (verbatim from ur7e_test.usda) ---
+# --- Robot world positions ---
+ROBOT1_POS = (-0.7458, 0.0652, 0.7786)
+ROBOT1_ROT = (0.30827, 0.30863, 0.83179, -0.34329)
+
+ROBOT2_POS = (-0.7208, 0.4421, 0.7768)
+ROBOT2_ROT = (-0.21841, 0.74088, 0.48853, 0.40586)
+
+# --- SimpleRoom position ---
 SIMPLE_ROOM_POS = (-0.2758352213446611, 0.2313240569149917, 0.07010507829325907)
 
 # --- Camera intrinsics (D435I at 720p) ---
 D435I_INTRINSICS_720 = [910.51, 0, 644.55, 0, 910.20, 369.72, 0, 0, 1]
 
-# --- Cube initial position (centre of randomisation volume) ---
 CUBE_INIT_POS = (-0.40, 0.15, 0.18)
 
 
 @configclass
 class SpatialPerceptionCfg(InteractiveSceneCfg):
-    """Scene with SimpleRoom, pillar backdrop, a red cube, and 2 fixed cameras."""
+    """Scene with SimpleRoom, pillar, robot arms, a red cube, and 2 fixed cameras."""
+
+    # Robot1 (right arm) — with Robotiq 2F-85 gripper
+    robot: ArticulationCfg = UR5E_ROBOTIQ_CFG.replace(
+        prim_path="{ENV_REGEX_NS}/Robot1",
+        init_state=UR5E_ROBOTIQ_CFG.init_state.replace(pos=ROBOT1_POS, rot=ROBOT1_ROT),
+    )
+
+    # Robot2 (left arm) — static visual only
+    robot2 = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Robot2",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{data_dir}/ur7e_description/ur5e/ur5e.usd",
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=ROBOT2_POS, rot=ROBOT2_ROT),
+    )
 
     # Structural pillar — mm-scale CAD → meters via scale 0.001
     pillar = AssetBaseCfg(

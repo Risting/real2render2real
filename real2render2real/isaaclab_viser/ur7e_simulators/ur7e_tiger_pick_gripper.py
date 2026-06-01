@@ -82,7 +82,8 @@ class TigerPickGripper(IsaacLabViser):
         super().__init__(simulation_app, scene_config, **kwargs)
 
         self._apply_pillar_orientation()
-        # No _spawn_grippers() — gripper is baked into the flat-hierarchy USD
+        self._spawn_left_arm()
+        # Right arm gripper is baked into flat-hierarchy USD
 
         self.isaac_viewport_camera = self.scene.sensors["viewport_camera"]
         self.camera_buffers = {"cam_0": deque(maxlen=1), "cam_1": deque(maxlen=1)}
@@ -116,6 +117,74 @@ class TigerPickGripper(IsaacLabViser):
                 xf.ClearXformOpOrder()
                 op = xf.AddTransformOp()
                 op.Set(mat)
+
+    def _spawn_left_arm(self):
+        """Spawn left arm + gripper as purely visual static meshes.
+
+        References UR5e USD under Robot2, strips ALL physics from arm and
+        gripper (ArticulationRootAPI, RigidBodyAPI, joints). Same approach
+        as the original 2.2 workaround from the progress doc.
+        """
+        import omni.usd
+        from pxr import Gf, UsdGeom, UsdPhysics
+        import os as _os
+
+        _dir = _os.path.dirname(_os.path.realpath(__file__))
+        data_dir = _os.path.join(_dir, "../../../data")
+        ur5e_usd = _os.path.abspath(_os.path.join(data_dir, "ur7e_description", "ur5e", "ur5e.usd"))
+        robotiq_usd = _os.path.abspath(_os.path.join(
+            data_dir, "assets/robotiq_2f_85/2F-85/Robotiq_2F_85_edit.usd"
+        ))
+        gpos = (-0.00548, -0.00440, -0.02588)
+        grot = (0.70710677, 0.0, 0.0, -0.70710677)
+        arm_pos = (-0.7208, 0.4421, 0.7768)
+        arm_rot = (-0.21841, 0.74088, 0.48853, 0.40586)
+
+        stage = omni.usd.get_context().get_stage()
+        for env_idx in range(self.scene.num_envs):
+            arm_path = f"/World/envs/env_{env_idx}/Robot2"
+            if stage.GetPrimAtPath(arm_path).IsValid():
+                continue
+
+            # Spawn arm
+            arm_prim = UsdGeom.Xform.Define(stage, arm_path).GetPrim()
+            arm_prim.GetReferences().AddReference(ur5e_usd)
+            xf = UsdGeom.Xformable(arm_prim)
+            xf.ClearXformOpOrder()
+            xf.AddTranslateOp().Set(Gf.Vec3d(*arm_pos))
+            xf.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(
+                Gf.Quatd(arm_rot[0], Gf.Vec3d(arm_rot[1], arm_rot[2], arm_rot[3]))
+            )
+
+            # Spawn gripper
+            gpath = arm_path + "/wrist_3_link/gripper"
+            gprim = UsdGeom.Xform.Define(stage, gpath).GetPrim()
+            gprim.GetReferences().AddReference(robotiq_usd)
+            gxf = UsdGeom.Xformable(gprim)
+            gxf.ClearXformOpOrder()
+            gxf.AddTranslateOp().Set(Gf.Vec3f(*gpos))
+            gxf.AddOrientOp().Set(Gf.Quatf(grot[0], Gf.Vec3f(grot[1], grot[2], grot[3])))
+
+            # Strip ALL physics from arm + gripper: APIs + joints
+            joints_to_kill = []
+            def _walk(p):
+                for c in p.GetChildren():
+                    path = c.GetPath().pathString
+                    if c.HasAPI(UsdPhysics.ArticulationRootAPI):
+                        c.RemoveAPI(UsdPhysics.ArticulationRootAPI)
+                    if c.HasAPI(UsdPhysics.RigidBodyAPI):
+                        c.RemoveAPI(UsdPhysics.RigidBodyAPI)
+                    tn = c.GetTypeName()
+                    if tn and "Joint" in tn:
+                        joints_to_kill.append(c)
+                    _walk(c)
+            _walk(arm_prim)
+
+            for j in joints_to_kill:
+                try:
+                    stage.RemovePrim(j.GetPath())
+                except Exception:
+                    pass
 
     def run_simulator(self):
         self.robot_entity_cfg = SceneEntityCfg(

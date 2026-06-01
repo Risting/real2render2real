@@ -9,10 +9,12 @@ import torch
 from isaaclab.utils.math import quat_from_matrix
 
 
-LOOK_AT = np.array([-0.40, 0.15, 0.20], dtype=np.float64)
+LOOK_AT = np.array([-0.50, 0.25, 0.40], dtype=np.float64)
 
-CAM0_POS = np.array([0.25, -0.05, 0.45], dtype=np.float64)
-CAM1_POS = np.array([0.25,  0.35, 0.45], dtype=np.float64)
+# Cam 0: further back + further left, pillar on the right side of frame
+CAM0_POS = np.array([0.35, -0.20, 1.20], dtype=np.float64)
+# Cam 1: further back + further right, pillar on the left side of frame
+CAM1_POS = np.array([0.35,  0.70, 1.20], dtype=np.float64)
 
 
 def _look_at_quat(eye, target, world_up=(0.0, 0.0, 1.0)):
