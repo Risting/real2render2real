@@ -27,7 +27,7 @@ class SpatialCubeCapture:
 
     # Teach-pendant joint angles (deg)
     ROBOT1_JOINT_DEG = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
-    ROBOT2_JOINT_DEG = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
+    ROBOT2_JOINT_DEG = [-50.52, -67.02, -131.03, 244.74, 235.85, -86.97]
 
     def __init__(self, simulation_app, scene_config, output_dir, num_samples=2000):
         self.simulation_app = simulation_app
