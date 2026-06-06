@@ -1,8 +1,11 @@
 """Spatial perception cube capture simulator.
 
-Both robot arms are ArticulationCfg with teach-pendant joint angles.
+Both robot arms are ArticulationCfg.  Supports two modes:
+  --arm_poses arm_poses.json  → load 100 pose groups, outer loop over poses
+  (no --arm_poses)            → use hardcoded defaults (backward compatible)
 """
 
+import json
 import os
 import time
 
@@ -21,19 +24,45 @@ from real2render2real.isaaclab_viser.spatial_perception.camera_extrinsics import
 class SpatialCubeCapture:
     """Standalone simulator for capturing spatial perception dataset images."""
 
-    VOLUME_X = (-0.55, -0.25)
-    VOLUME_Y = (-0.05,  0.35)
-    VOLUME_Z = ( 0.11,  0.35)
+    VOLUME_X = (-0.65, -0.15)
+    VOLUME_Y = (-0.10,  0.40)
+    VOLUME_Z = ( 0.11,  0.40)
 
-    # Teach-pendant joint angles (deg)
-    ROBOT1_JOINT_DEG = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
-    ROBOT2_JOINT_DEG = [-50.52, -67.02, -131.03, 244.74, 235.85, -86.97]
+    # Fallback default joint angles (deg) when no arm_poses file
+    DEFAULT_R1 = [55.53, -139.53, 128.47, -30.04, -236.09, 92.30]
+    DEFAULT_R2 = [-50.52, -67.02, -131.03, 244.74, 235.85, -86.97]
 
-    def __init__(self, simulation_app, scene_config, output_dir, num_samples=2000):
+    def __init__(self, simulation_app, scene_config, output_dir,
+                 num_samples=2000, arm_poses_path=None, cubes_per_pose=None):
         self.simulation_app = simulation_app
         self.output_dir = output_dir
         self.num_samples = num_samples
 
+        # --- Load arm poses ---
+        self.arm_poses = None
+        self._r1_list = None   # independent list for Robot1
+        self._r2_list = None   # independent list for Robot2
+        self.cubes_per_pose = None
+        if arm_poses_path and os.path.exists(arm_poses_path):
+            with open(arm_poses_path) as f:
+                data = json.load(f)
+            # Two formats:
+            #   A) {"robot1": [[...],...], "robot2": [[...],...]}  independent
+            #   B) {"poses": [{"robot1": [...], "robot2": [...]},...]} paired
+            if "robot1" in data and "robot2" in data and isinstance(data["robot1"][0], list):
+                self._r1_list = data["robot1"]
+                self._r2_list = data["robot2"]
+                print(f"[INFO] Loaded independent lists: "
+                      f"Robot1={len(self._r1_list)}, Robot2={len(self._r2_list)}")
+            else:
+                self.arm_poses = data["poses"]  # paired format (backward compatible)
+                print(f"[INFO] Loaded {len(self.arm_poses)} paired pose groups")
+            self.cubes_per_pose = cubes_per_pose or max(1, num_samples // 100)
+            print(f"[INFO] {self.cubes_per_pose} cube placements per arm pose")
+        else:
+            print("[INFO] No arm_poses file — using hardcoded default poses")
+
+        # --- Simulation ---
         render_cfg = sim_utils.RenderCfg(
             antialiasing_mode="DLAA",
             enable_dl_denoiser=True,
@@ -46,7 +75,10 @@ class SpatialCubeCapture:
         self.sim.reset()
 
         self._apply_pillar_orientation()
-        self._set_robot_poses()
+
+        # Set initial arm pose (random from file, or defaults)
+        r1, r2 = self._pick_arm_pose()
+        self._write_arm_pose(r1, r2)
 
         self.camera = self.scene.sensors["viewport_camera"]
         self.device = self.scene.env_origins.device
@@ -54,10 +86,13 @@ class SpatialCubeCapture:
 
         os.makedirs(os.path.join(output_dir, "cam_0"), exist_ok=True)
         os.makedirs(os.path.join(output_dir, "cam_1"), exist_ok=True)
-        self.labels = np.zeros((num_samples, 3), dtype=np.float32)
+
+        # labels: (N, 4) = [x, y, z, pose_index]  when arm_poses is used
+        # labels: (N, 3) = [x, y, z]               when no arm_poses
+        ncols = 4 if (self.arm_poses or self._r1_list) else 3
+        self.labels = np.zeros((num_samples, ncols), dtype=np.float32)
 
         # Warmup renders
-        self._set_robot_poses()
         cam_positions, cam_orientations = get_fixed_cam_poses(self.device)
         self.camera.set_world_poses(cam_positions, cam_orientations, convention="ros")
         self.sim.step(render=True)
@@ -93,25 +128,33 @@ class SpatialCubeCapture:
                 op.Set(mat)
 
     # ------------------------------------------------------------------
-    # Robot arms — both at teach-pendant pose
+    # Arm pose helpers
     # ------------------------------------------------------------------
 
-    def _set_robot_poses(self):
-        """Robot1: teach-pendant pose.  Robot2: mirrored (negated joints)."""
-        targets = {
-            "robot":  self.ROBOT1_JOINT_DEG,
-            "robot2": self.ROBOT2_JOINT_DEG,
-        }
+    def _pick_arm_pose(self, index=-1):
+        """Return (r1_deg, r2_deg). Independent lists → random from each."""
+        if self._r1_list is not None and self._r2_list is not None:
+            i = index if 0 <= index < len(self._r1_list) else np.random.randint(len(self._r1_list))
+            j = index if 0 <= index < len(self._r2_list) else np.random.randint(len(self._r2_list))
+            return self._r1_list[i], self._r2_list[j]
+        if self.arm_poses and 0 <= index < len(self.arm_poses):
+            p = self.arm_poses[index]
+            return p["robot1"], p["robot2"]
+        return self.DEFAULT_R1, self.DEFAULT_R2
+
+    def _write_arm_pose(self, r1_deg, r2_deg):
+        """Write joint angles to both robot articulations."""
+        targets = {"robot": r1_deg, "robot2": r2_deg}
         for name, deg in targets.items():
             art = self.scene.articulations.get(name)
             if art is None:
                 continue
             joint_pos = art.data.default_joint_pos.clone()
-            target_rad = torch.tensor(
+            t = torch.tensor(
                 [np.deg2rad(a) for a in deg],
                 device=joint_pos.device, dtype=joint_pos.dtype,
             )
-            joint_pos[0, :6] = target_rad
+            joint_pos[0, :6] = t
             art.write_joint_state_to_sim(
                 joint_pos, art.data.default_joint_vel.clone()
             )
@@ -160,53 +203,101 @@ class SpatialCubeCapture:
     # ------------------------------------------------------------------
 
     def run(self):
-        print(f"[INFO] Starting capture: {self.num_samples} samples → {self.output_dir}")
         t_start = time.time()
 
-        for idx in range(self.num_samples):
-            self._capture_sample(idx)
-
-            if (idx + 1) % 100 == 0:
-                elapsed = time.time() - t_start
-                rate = (idx + 1) / elapsed
-                eta = (self.num_samples - idx - 1) / rate if rate > 0 else 0
-                print(f"  [{idx + 1:5d}/{self.num_samples}]  "
-                      f"{rate:.1f} samples/s  ETA {eta:.0f}s")
-
-        np.save(os.path.join(self.output_dir, "labels.npy"), self.labels)
+        if self.arm_poses or self._r1_list:
+            self._run_with_poses(t_start)
+        else:
+            self._run_single_pose(t_start)
 
         elapsed = time.time() - t_start
         print(f"[DONE] {self.num_samples} samples in {elapsed:.1f}s "
               f"({self.num_samples / elapsed:.1f} samples/s)")
         print(f"  → {self.output_dir}")
 
-    def _capture_sample(self, idx):
-        pos = self._random_cube_position()
-        self._set_cube_position(pos)
+    def _run_with_poses(self, t_start):
+        """Random arm pose combinations per cube placement block."""
+        idx = 0
+        n = self.num_samples
+        cpp = self.cubes_per_pose or 1
 
-        self._set_robot_poses()
-        self._set_camera_poses()
+        print(f"[INFO] Starting capture: {n} samples (~{cpp} cubes/arm-pose)")
 
-        self.sim.step(render=True)
-        self.camera.update(0, force_recompute=True)
+        r1_deg, r2_deg = self._pick_arm_pose()
+        self._write_arm_pose(r1_deg, r2_deg)
 
-        rgb = self.camera.data.output["rgb"]
-        img0 = rgb[0].cpu().numpy()
-        img1 = rgb[1].cpu().numpy()
+        for idx in range(n):
+            # New arm pose every cpp cubes
+            if idx > 0 and idx % cpp == 0:
+                r1_deg, r2_deg = self._pick_arm_pose()
+                self._write_arm_pose(r1_deg, r2_deg)
 
-        img0 = np.flipud(img0)
-        img1 = np.flipud(img1)
+            pos = self._random_cube_position()
+            self._set_cube_position(pos)
+            self._set_camera_poses()
 
-        cv2.imwrite(
-            os.path.join(self.output_dir, "cam_0", f"{idx:06d}.jpg"),
-            cv2.cvtColor(img0, cv2.COLOR_RGB2BGR),
-        )
-        cv2.imwrite(
-            os.path.join(self.output_dir, "cam_1", f"{idx:06d}.jpg"),
-            cv2.cvtColor(img1, cv2.COLOR_RGB2BGR),
-        )
+            self.sim.step(render=True)
+            self.camera.update(0, force_recompute=True)
 
-        self.labels[idx] = pos
+            rgb = self.camera.data.output["rgb"]
+            img0 = np.flipud(rgb[0].cpu().numpy())
+            img1 = np.flipud(rgb[1].cpu().numpy())
+
+            cv2.imwrite(
+                os.path.join(self.output_dir, "cam_0", f"{idx:06d}.jpg"),
+                cv2.cvtColor(img0, cv2.COLOR_RGB2BGR),
+            )
+            cv2.imwrite(
+                os.path.join(self.output_dir, "cam_1", f"{idx:06d}.jpg"),
+                cv2.cvtColor(img1, cv2.COLOR_RGB2BGR),
+            )
+            self.labels[idx] = [pos[0], pos[1], pos[2], -1]
+
+            if (idx + 1) % 100 == 0:
+                elapsed = time.time() - t_start
+                rate = (idx + 1) / elapsed
+                eta = (n - idx - 1) / rate if rate > 0 else 0
+                print(f"  [{idx + 1:5d}/{n}]  {rate:.1f} samples/s  ETA {eta:.0f}s")
+
+        np.save(os.path.join(self.output_dir, "labels.npy"), self.labels)
+
+    def _run_single_pose(self, t_start):
+        """Single fixed pose (no arm_poses file). Original behaviour."""
+        n = self.num_samples
+        print(f"[INFO] Starting capture: {n} samples (single arm pose)")
+
+        r1, r2 = self._pick_arm_pose(-1)
+        self._write_arm_pose(r1, r2)
+
+        for idx in range(n):
+            pos = self._random_cube_position()
+            self._set_cube_position(pos)
+            self._set_camera_poses()
+
+            self.sim.step(render=True)
+            self.camera.update(0, force_recompute=True)
+
+            rgb = self.camera.data.output["rgb"]
+            img0 = np.flipud(rgb[0].cpu().numpy())
+            img1 = np.flipud(rgb[1].cpu().numpy())
+
+            cv2.imwrite(
+                os.path.join(self.output_dir, "cam_0", f"{idx:06d}.jpg"),
+                cv2.cvtColor(img0, cv2.COLOR_RGB2BGR),
+            )
+            cv2.imwrite(
+                os.path.join(self.output_dir, "cam_1", f"{idx:06d}.jpg"),
+                cv2.cvtColor(img1, cv2.COLOR_RGB2BGR),
+            )
+            self.labels[idx] = pos
+
+            if (idx + 1) % 100 == 0:
+                elapsed = time.time() - t_start
+                rate = (idx + 1) / elapsed
+                eta = (n - idx - 1) / rate if rate > 0 else 0
+                print(f"  [{idx + 1:5d}/{n}]  {rate:.1f} samples/s  ETA {eta:.0f}s")
+
+        np.save(os.path.join(self.output_dir, "labels.npy"), self.labels)
 
     def close(self):
         self.simulation_app.close()
