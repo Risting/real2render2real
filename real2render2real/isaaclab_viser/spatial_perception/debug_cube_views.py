@@ -1,13 +1,14 @@
-"""Red cube on pure black background — three orthographic views.
+"""One shape three-view: front / side / top. Black background.
 
-Run on cloud:
-    cd .../IsaacLab
-    ./isaaclab.sh -p ...debug_cube_views.py
+Usage:
+    ./isaaclab.sh -p ...debug_cube_views.py --shape cube
 """
 import argparse
 from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser()
 AppLauncher.add_app_launcher_args(parser)
+parser.add_argument("--shape", type=str, default="cube", choices=["cube","cuboid","cylinder","sphere"])
+parser.add_argument("--output_dir", type=str, default="/root/gpufree-data/spatial_perception_dataset")
 args_cli = parser.parse_args()
 args_cli.headless = True; args_cli.enable_cameras = True
 app_launcher = AppLauncher(args_cli)
@@ -22,46 +23,44 @@ from isaaclab.sensors import MultiTiledCameraCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.math import quat_from_matrix
 
-CUBE_SIZE = 0.05
-D435I_INTRINSICS_720 = [910.51, 0, 644.55, 0, 910.20, 369.72, 0, 0, 1]
+D435I = [910.51, 0, 644.55, 0, 910.20, 369.72, 0, 0, 1]
+
+SHAPE_CFG = {
+    "cube":     sim_utils.CuboidCfg(size=(0.05,)*3, visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9,0.15,0.15))),
+    "cuboid":   sim_utils.CuboidCfg(size=(0.08,0.04,0.04), visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15,0.7,0.15))),
+    "cylinder": sim_utils.CylinderCfg(radius=0.025, height=0.08, visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15,0.4,0.9))),
+    "sphere":   sim_utils.SphereCfg(radius=0.035, visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9,0.7,0.1))),
+}
 
 
 @configclass
-class CubeOnlyCfg(InteractiveSceneCfg):
-    cube = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Cube",
-        spawn=sim_utils.CuboidCfg(size=(CUBE_SIZE,)*3,
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.15, 0.15))),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0, 0, CUBE_SIZE/2)),
-    )
-    camera = MultiTiledCameraCfg(
-        prim_path="{ENV_REGEX_NS}/Viewport", height=720, width=1280, data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
-            intrinsic_matrix=D435I_INTRINSICS_720, height=720, width=1280, clipping_range=(0.001, 20)),
-        cams_per_env=2,
-    )
-    # Even multi-directional lighting
-    light1 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/Light1",
-        spawn=sim_utils.CylinderLightCfg(intensity=2000.0, radius=0.5),
+class BaseCfg(InteractiveSceneCfg):
+    camera = MultiTiledCameraCfg(prim_path="{ENV_REGEX_NS}/Viewport", height=720, width=1280,
+        data_types=["rgb"], spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
+            intrinsic_matrix=D435I, height=720, width=1280, clipping_range=(0.001, 20)), cams_per_env=2)
+    l1 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/L1", spawn=sim_utils.CylinderLightCfg(intensity=2000, radius=0.5),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.8, 0, 0.2)))
-    light2 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/Light2",
-        spawn=sim_utils.CylinderLightCfg(intensity=2000.0, radius=0.5),
+    l2 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/L2", spawn=sim_utils.CylinderLightCfg(intensity=2000, radius=0.5),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(-0.8, 0, 0.2)))
-    light3 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/Light3",
-        spawn=sim_utils.CylinderLightCfg(intensity=2000.0, radius=0.5),
+    l3 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/L3", spawn=sim_utils.CylinderLightCfg(intensity=2000, radius=0.5),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0, 0.8, 0.2)))
-    light4 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/Light4",
-        spawn=sim_utils.CylinderLightCfg(intensity=2000.0, radius=0.5),
+    l4 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/L4", spawn=sim_utils.CylinderLightCfg(intensity=2000, radius=0.5),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0, -0.8, 0.2)))
-    light5 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/Light5",
-        spawn=sim_utils.CylinderLightCfg(intensity=2000.0, radius=0.5),
+    l5 = AssetBaseCfg(prim_path="{ENV_REGEX_NS}/L5", spawn=sim_utils.CylinderLightCfg(intensity=2000, radius=0.5),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0, 0, 1.0)))
 
 
-cfg = CubeOnlyCfg(num_envs=1, env_spacing=2.0)
+cfg = BaseCfg(num_envs=1, env_spacing=2.0)
 sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(device="cuda:0",
     render=sim_utils.RenderCfg(antialiasing_mode="DLAA", enable_dl_denoiser=True, dlss_mode=1)))
 scene = InteractiveScene(cfg)
+
+# Spawn shape manually
+from pxr import UsdGeom, Gf; import omni.usd
+stage = omni.usd.get_context().get_stage()
+spawn_cfg = SHAPE_CFG[args_cli.shape]
+spawn_cfg.func("/World/envs/env_0/Obj", spawn_cfg)
+
 sim.reset()
 cam = scene.sensors["camera"]
 
@@ -81,18 +80,16 @@ def capture(eye, target):
     cam.set_world_poses(torch.stack([eye_t, eye_t]), torch.stack([quat, quat]), convention="ros")
     sim.step(render=True); cam.update(0, force_recompute=True)
     sim.step(render=True); cam.update(0, force_recompute=True)
-    img = cam.data.output["rgb"][0].cpu().numpy()
-    return np.flipud(img)
+    return np.flipud(cam.data.output["rgb"][0].cpu().numpy())
 
 
-T = np.array([0.0, 0.0, CUBE_SIZE/2])
-out = "/root/gpufree-data/spatial_perception_dataset/cube_views"
+out = f"{args_cli.output_dir}/{args_cli.shape}"
 os.makedirs(out, exist_ok=True)
-d = 0.20  # camera distance
+T = np.array([0.0, 0.0, 0.025])
 
-for name, eye in [("front", (0, -d, CUBE_SIZE/2)), ("side", (-d, 0, CUBE_SIZE/2)), ("top", (0, 0, d))]:
-    cv2.imwrite(f"{out}/{name}.jpg", cv2.cvtColor(capture(np.array(eye), T), cv2.COLOR_RGB2BGR))
-    print(f"  Saved {name}.jpg")
+for vname, eye in [("front", (0, -0.20, 0.025)), ("side", (-0.20, 0, 0.025)), ("top", (0, 0, 0.20))]:
+    cv2.imwrite(f"{out}/{vname}.jpg", cv2.cvtColor(capture(np.array(eye), T), cv2.COLOR_RGB2BGR))
+    print(f"  {out}/{vname}.jpg")
 
-print(f"\nDone → {out}")
+print("Done")
 simulation_app.close()

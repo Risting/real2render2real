@@ -78,9 +78,31 @@ class SpatialPerceptionCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Cube",
         spawn=sim_utils.CuboidCfg(
             size=(0.05, 0.05, 0.05),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.9, 0.15, 0.15),
-            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.15, 0.15)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=CUBE_INIT_POS),
+    )
+    cuboid = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Cuboid",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.08, 0.04, 0.04),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15, 0.7, 0.15)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=CUBE_INIT_POS),
+    )
+    cylinder = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Cylinder",
+        spawn=sim_utils.CylinderCfg(
+            radius=0.025, height=0.08,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15, 0.4, 0.9)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=CUBE_INIT_POS),
+    )
+    sphere = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Sphere",
+        spawn=sim_utils.SphereCfg(
+            radius=0.035,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.7, 0.1)),
         ),
         init_state=AssetBaseCfg.InitialStateCfg(pos=CUBE_INIT_POS),
     )
