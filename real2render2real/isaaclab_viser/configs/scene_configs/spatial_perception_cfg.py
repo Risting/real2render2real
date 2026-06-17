@@ -112,7 +112,7 @@ class SpatialPerceptionCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Viewport",
         height=720,
         width=1280,
-        data_types=["rgb"],
+        data_types=["rgb", "depth"],
         spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
             intrinsic_matrix=D435I_INTRINSICS_720,
             height=720,

@@ -62,6 +62,8 @@ class SpatialCubeCapture:
 
         os.makedirs(os.path.join(output_dir, "cam_0"), exist_ok=True)
         os.makedirs(os.path.join(output_dir, "cam_1"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "depth_0"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "depth_1"), exist_ok=True)
 
         has_poses = bool(self.arm_poses or self._r1_list)
         ncols = 5 if has_poses else 4  # x,y,z,shape_id[,pose_index]
@@ -164,8 +166,18 @@ class SpatialCubeCapture:
         self._set_camera_poses()
         self.sim.step(render=True); self.camera.update(0, force_recompute=True)
         rgb = self.camera.data.output["rgb"]
+        depth = self.camera.data.output.get("depth")
+        d0, d1 = os.path.join(self.output_dir, "depth_0"), os.path.join(self.output_dir, "depth_1")
+
         cv2.imwrite(f"{self.output_dir}/cam_0/{idx:06d}.jpg", cv2.cvtColor(np.flipud(rgb[0].cpu().numpy()), cv2.COLOR_RGB2BGR))
         cv2.imwrite(f"{self.output_dir}/cam_1/{idx:06d}.jpg", cv2.cvtColor(np.flipud(rgb[1].cpu().numpy()), cv2.COLOR_RGB2BGR))
+        if depth is not None:
+            d0_arr = np.flipud(depth[0].cpu().numpy().squeeze())
+            d1_arr = np.flipud(depth[1].cpu().numpy().squeeze())
+            d0_norm = (np.clip(d0_arr, 0, 5) / 5 * 255).astype(np.uint8)
+            d1_norm = (np.clip(d1_arr, 0, 5) / 5 * 255).astype(np.uint8)
+            cv2.imwrite(f"{d0}/{idx:06d}.png", d0_norm)
+            cv2.imwrite(f"{d1}/{idx:06d}.png", d1_norm)
         if self.labels.shape[1] == 5:
             self.labels[idx] = [pos[0], pos[1], pos[2], shape_id, -1]
         else:
